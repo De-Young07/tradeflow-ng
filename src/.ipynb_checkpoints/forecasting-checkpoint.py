@@ -112,8 +112,8 @@ def generate_forecast(model, periods=7):
     forecast = model.predict(future)
 
     # Keep only the future portion
-    today = pd.Timestamp(date.today()) - pd.Timedelta(days=1)
-    forecast = forecast[forecast["ds"] > today].copy()
+    today = pd.Timestamp(date.today())
+    forecast = forecast[forecast["ds"] >= today].copy()
 
     # Keep only what we need
     forecast = forecast[["ds", "yhat", "yhat_lower", "yhat_upper"]].copy()
