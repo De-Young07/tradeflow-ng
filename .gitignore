@@ -25,3 +25,5 @@ Thumbs.db
 config.ini
 secrets.py
 *.key
+
+.streamlit/secrets.toml

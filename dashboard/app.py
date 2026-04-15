@@ -13,6 +13,11 @@ import plotly.graph_objects as go
 from datetime import date, timedelta
 import sys, os
 
+
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+from auth import require_admin_login
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 st.set_page_config(
@@ -142,6 +147,10 @@ def load_recs_full(run_id):
         WHERE r.run_id = ?
         ORDER BY r.expected_profit_ngn DESC
     """, (run_id,))
+
+
+if not require_admin_login():
+    st.stop()
 
 # ══════════════════════════════════════════════════════════
 # SIDEBAR

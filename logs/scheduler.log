@@ -8,3 +8,16 @@
 2026-04-14 22:31:28,879 [INFO] ============================================================
 2026-04-14 22:31:28,892 [INFO] Added job "TradeFlow NG Daily Pipeline" to job store "default"
 2026-04-14 22:31:28,893 [INFO] Scheduler started
+2026-04-15 06:00:00,815 [INFO] Scheduler stopped.
+2026-04-15 06:27:45,277 [INFO] Evaluating forecast accuracy against actual outcomes...
+2026-04-15 06:27:47,134 [INFO]   Only 0 outcomes in last 30 days (need 5). Skipping accuracy check.
+2026-04-15 06:29:01,596 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-04-15 06:29:01,597 [INFO] ============================================================
+2026-04-15 06:29:01,598 [INFO]   TRADEFLOW NG SCHEDULER STARTED
+2026-04-15 06:29:01,599 [INFO]   Daily pipeline scheduled at 06:00 (Lagos time)
+2026-04-15 06:29:01,600 [INFO]   Retraining threshold: MAPE > 15.0%
+2026-04-15 06:29:01,600 [INFO]   Log file: C:\Users\USER\Projects\TradeFlow\logs\scheduler.log
+2026-04-15 06:29:01,601 [INFO]   Press Ctrl+C to stop.
+2026-04-15 06:29:01,602 [INFO] ============================================================
+2026-04-15 06:29:01,604 [INFO] Added job "TradeFlow NG Daily Pipeline" to job store "default"
+2026-04-15 06:29:01,605 [INFO] Scheduler started
