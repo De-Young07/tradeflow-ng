@@ -638,7 +638,10 @@ def print_recommendations(recommendations):
         if row["is_backhaul"]:       flags.append("↩ BACKHAUL")
         flag_str = "  " + " | ".join(flags) if flags else ""
 
-        print(f"\n  {row['commodity']} | {row['origin']} → {row['destination']}{flag_str}")
+        commodity = row.get('commodity') or 'Unknown'
+        origin    = row.get('origin')    or 'Unknown'
+        dest      = row.get('destination') or 'Unknown'
+        print(f"\n  {commodity} | {origin} → {dest}{flag_str}")
         print(f"  {'─'*60}")
         print(f"  Quantity:       {row['recommended_quantity']:>8.1f} units")
         print(f"  Buy price:      ₦{row['buy_price']:>10,.0f} / unit")

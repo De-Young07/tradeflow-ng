@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+env/
+
+# Data (never commit raw data to Git)
+data/raw/
+data/processed/
+*.csv
+*.xlsx
+*.db
+*.sqlite
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+config.ini
+secrets.py
+*.key

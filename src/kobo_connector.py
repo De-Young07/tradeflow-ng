@@ -3,9 +3,9 @@ TradeFlow NG — KoboToolbox Connector
 Pulls weekly submissions from KoboToolbox API
 and inserts into raw_submissions table.
 
-STATUS: Ready but dormant — activate when your Kobo form is live.
+STATUS: Ready but dormant until Kobo form is finalized and config.ini is set up.
 
-SETUP (do this when form is ready):
+SETUP INSTRUCTIONS:
     1. Log into KoboToolbox → Account Settings → API Key → Copy it
     2. Find your form's Asset UID from the form URL
     3. Create a file: TradeFlow/config.ini with contents:
