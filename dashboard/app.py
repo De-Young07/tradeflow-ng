@@ -79,7 +79,6 @@ try:
 except (KeyError, FileNotFoundError):
     pass
 
-from db_adapter import query, execute, get_connection
 
 @st.cache_resource
 
