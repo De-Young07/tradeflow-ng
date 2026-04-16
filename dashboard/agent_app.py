@@ -10,6 +10,10 @@ import pandas as pd
 from datetime import date, datetime
 import sys, os
 
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+from auth import require_agent_login, agent_logout
+
 st.set_page_config(
     page_title="TradeFlow NG — Agent",
     page_icon="🌾",
@@ -434,13 +438,18 @@ html, body, [class*="css"] {{
 </style>
 """, unsafe_allow_html=True)
 
+
+
 # ══════════════════════════════════════════════════════════
 # SESSION STATE
 # ══════════════════════════════════════════════════════════
 
 for key, default in [
-    ("agent_id", None), ("agent_name", None),
-    ("agent_state", None), ("agent_state_id", None),
+    ("agent_id", None),
+    ("agent_name", None),
+    ("agent_state", None),
+    ("agent_state_id", None),
+    ("agent_authenticated", False),  # ← add this if missing
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -449,58 +458,29 @@ for key, default in [
 # LOGIN
 # ══════════════════════════════════════════════════════════
 
-if st.session_state.agent_id is None:
-    st.markdown("""
-    <div class="login-card">
-        <div class="login-icon">🌾</div>
-        <div class="login-title">TradeFlow NG</div>
-        <div class="login-sub">
-            Enter your registered phone number to access your trade assignments
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
 
-    phone = st.text_input(
-        "", placeholder="📱  08012345678",
-        label_visibility="collapsed"
-    )
-
-    if st.button("Login →", type="primary"):
-        agent = query(
-            "SELECT * FROM agents WHERE phone=? AND is_active=1",
-            (phone.strip(),)
-        )
-        if not agent.empty:
-            a = agent.iloc[0]
-            state_row = query(
-                "SELECT id, name FROM states WHERE id=?",
-                (int(a["state_id"]),)
-            )
-            st.session_state.agent_id       = int(a["id"])
-            st.session_state.agent_name     = a["full_name"]
-            st.session_state.agent_state    = (
-                state_row.iloc[0]["name"] if not state_row.empty else "—"
-            )
-            st.session_state.agent_state_id = (
-                int(state_row.iloc[0]["id"]) if not state_row.empty else None
-            )
-            st.rerun()
-        else:
-            st.error("❌ Phone number not found. Contact your supervisor.")
-
+authenticated, agent_data = require_agent_login()
+if not authenticated:
     st.stop()
+
+# Then use agent_data instead of st.session_state directly:
+agent_id    = agent_data["agent_id"]
+agent_name  = agent_data["agent_name"]
+agent_state = agent_data["agent_state"]
+sid         = agent_data["agent_state_id"]
 
 # ══════════════════════════════════════════════════════════
 # LOGGED IN — VARIABLES
 # ══════════════════════════════════════════════════════════
 
-agent_id    = st.session_state.agent_id
-agent_name  = st.session_state.agent_name
-agent_state = st.session_state.agent_state
-sid         = st.session_state.agent_state_id
 
 # ── Hero header ──────────────────────────────────────────
-first_name = agent_name.split()[0]
+
+agent_name  = st.session_state.get("agent_name") or "Agent"
+agent_state = st.session_state.get("agent_state") or "—"
+sid         = st.session_state.get("agent_state_id")
+agent_id    = st.session_state.get("agent_id")
+first_name  = agent_name.split()[0]
 st.markdown(f"""
 <div class="hero">
     <div class="hero-icon">👋</div>
@@ -680,7 +660,7 @@ if page == "📋 My Trades":
 
     if not local.empty:
         local["Price"] = local["Price"].apply(naira)
-        st.dataframe(local, use_container_width=True, hide_index=True)
+        st.dataframe(local, width='stretch', hide_index=True)
     else:
         st.markdown(
             '<div class="no-trades" style="padding:24px;">'
@@ -948,7 +928,7 @@ elif page == "💬 Price":
 
     if not recent.empty:
         recent["Price"] = recent["Price"].apply(naira)
-        st.dataframe(recent, use_container_width=True, hide_index=True)
+        st.dataframe(recent, width='stretch', hide_index=True)
     else:
         st.markdown(
             '<div class="no-trades" style="padding:20px;">'

@@ -5,6 +5,11 @@ TradeFlow NG — Database Initializer
 import sqlite3
 import os
 
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite")
+IS_POSTGRES  = DATABASE_URL.startswith("postgresql")
+
+# Use db_adapter instead of direct sqlite3 calls
+from db_adapter import query, execute, executemany, get_connection
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH  = os.path.join(BASE_DIR, "data", "tradeflow.db")

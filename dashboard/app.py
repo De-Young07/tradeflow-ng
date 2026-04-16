@@ -20,6 +20,13 @@ from auth import require_admin_login
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
+# Read DATABASE_URL from Streamlit secrets or environment
+try:
+    db_url = st.secrets["database"]["DATABASE_URL"]
+    os.environ["DATABASE_URL"] = db_url
+except (KeyError, FileNotFoundError):
+    pass  # Falls back to SQLite locally
+
 st.set_page_config(
     page_title="TradeFlow NG",
     page_icon="🌾",
@@ -63,21 +70,18 @@ GRAY   = "#555555"
 # ══════════════════════════════════════════════════════════
 # HELPERS
 # ══════════════════════════════════════════════════════════
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+# Load DATABASE_URL from Streamlit secrets into environment
+try:
+    os.environ["DATABASE_URL"] = st.secrets["database"]["DATABASE_URL"]
+except (KeyError, FileNotFoundError):
+    pass
+
+from db_adapter import query, execute, get_connection
 
 @st.cache_resource
-def get_connection():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def query(sql, params=()):
-    return pd.read_sql(sql, get_connection(), params=params)
-
-def execute(sql, params=()):
-    conn = get_connection()
-    conn.execute(sql, params)
-    conn.commit()
 
 def naira(v):
     try: return f"₦{float(v):,.0f}"
@@ -272,7 +276,7 @@ if tab == "📊 Overview":
             )
             fig.update_xaxes(tickfont=dict(color="#1A1A1A"))
             fig.update_yaxes(tickfont=dict(color="#1A1A1A"))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.info(f"No price data for {sel_comm} yet. Only Yam, Maize, Rice, and Tomato have dummy data.")
 
@@ -302,7 +306,7 @@ if tab == "📊 Overview":
             )
             fig2.update_xaxes(tickfont=dict(color="#1A1A1A"))
             fig2.update_yaxes(tickfont=dict(color="#1A1A1A"))
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig2, width='stretch')
         else:
             st.info("Run the optimizer to see profit breakdown.")
 
@@ -348,7 +352,7 @@ if tab == "📊 Overview":
         )
         fig3.update_xaxes(tickfont=dict(color="#1A1A1A"))
         fig3.update_yaxes(tickfont=dict(color="#1A1A1A"))
-        st.plotly_chart(fig3, use_container_width=True)
+        st.plotly_chart(fig3, width='stretch')
     else:
         st.info("Not enough zonal data for gap analysis yet.")
 
@@ -368,7 +372,7 @@ if tab == "📊 Overview":
         logs["Status"] = logs["Status"].apply(
             lambda s: f"✅ {s}" if s == "Success" else f"❌ {s}" if s == "Failed" else f"⚠️ {s}"
         )
-        st.dataframe(logs, use_container_width=True, hide_index=True)
+        st.dataframe(logs, width='stretch', hide_index=True)
     else:
         st.info("No pipeline runs recorded yet.")
 
@@ -608,7 +612,7 @@ elif tab == "📋 Tableau":
         )
         fig.update_xaxes(tickfont=dict(color="#1A1A1A"))
         fig.update_yaxes(tickfont=dict(color="#1A1A1A"))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
         # Top 3
         best = tableau[tableau["profit_per_unit"] > 0].nlargest(3, "profit_per_unit")
@@ -643,7 +647,7 @@ elif tab == "📋 Tableau":
                     "Sell Price (Forecast)", "Transport Cost",
                     "Profit/Unit", "Cost Data", "Forecast Quality"
                 ]],
-                use_container_width=True, hide_index=True
+                width='stretch', hide_index=True
             )
 
 
@@ -748,7 +752,7 @@ elif tab == "📈 Forecasts":
         )
         fig.update_xaxes(tickfont=dict(color="#1A1A1A"))
         fig.update_yaxes(tickfont=dict(color="#1A1A1A"))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
         if not fc.empty:
             cs1, cs2, cs3 = st.columns(3)
@@ -769,7 +773,7 @@ elif tab == "📈 Forecasts":
                     st.dataframe(
                         shocks[["forecast_date", "predicted_price",
                                 "lower_bound", "upper_bound", "shock_reason"]],
-                        use_container_width=True, hide_index=True
+                        width='stretch', hide_index=True
                     )
 
             with st.expander("📋 Full 7-day forecast table"):
@@ -788,7 +792,7 @@ elif tab == "📈 Forecasts":
                         "upper_bound": "Upper Bound",
                         "is_shock_flagged": "Risk Level",
                     }),
-                    use_container_width=True, hide_index=True
+                    width='stretch', hide_index=True
                 )
 
 
@@ -921,7 +925,7 @@ elif tab == "📝 Feedback":
     if not outcomes.empty:
         for col in ["Buy Price", "Sell Price", "Transport Cost", "Actual Profit"]:
             outcomes[col] = outcomes[col].apply(naira)
-        st.dataframe(outcomes, use_container_width=True, hide_index=True)
+        st.dataframe(outcomes, width='stretch', hide_index=True)
     else:
         st.info("No outcomes logged yet.")
 
@@ -995,7 +999,7 @@ elif tab == "⚙️ Data Management":
                 if acc.empty:
                     st.info("Not enough outcome data yet. Log at least 5 completed trades first.")
                 else:
-                    st.dataframe(acc, use_container_width=True, hide_index=True)
+                    st.dataframe(acc, width='stretch', hide_index=True)
                     needs = acc[acc["needs_retrain"]]
                     if not needs.empty:
                         st.warning(f"⚠️ {len(needs)} commodity/ies exceed {MAPE_THRESHOLD}% error threshold and need retraining.")
@@ -1005,6 +1009,28 @@ elif tab == "⚙️ Data Management":
                 st.error(f"❌ {e}")
 
     st.divider()
+
+    st.subheader("👤 Register New Agent")
+    with st.form("register_agent"):
+        col1, col2 = st.columns(2)
+        with col1:
+            a_name  = st.text_input("Full name")
+            a_phone = st.text_input("Phone number", placeholder="08012345678")
+        with col2:
+            states  = query("SELECT id, name FROM states ORDER BY name")
+            a_state = st.selectbox("State", states["name"].tolist())
+            a_role  = st.selectbox("Role", ["Reporter", "Supervisor"])
+
+        if st.form_submit_button("Register Agent", type="primary"):
+            state_id = int(states[states["name"] == a_state].iloc[0]["id"])
+            try:
+                execute("""
+                    INSERT INTO agents (full_name, phone, state_id, role, is_active)
+                    VALUES (?, ?, ?, ?, 1)
+                """, (a_name, a_phone, state_id, a_role))
+                st.success(f"✅ {a_name} registered. They can now log in with {a_phone}.")
+            except Exception as e:
+                st.error(f"❌ {e} — phone number may already exist.")
 
     # ── CSV Upload ─────────────────────────────────────────
     st.subheader("📂 Upload Agent Price Reports")
@@ -1078,7 +1104,7 @@ elif tab == "⚙️ Data Management":
                     else "⚪ Empty"  if counts[t] == 0
                     else "❌ Error"),
     } for t in tables])
-    st.dataframe(cdf, use_container_width=True, hide_index=True)
+    st.dataframe(cdf, width='stretch', hide_index=True)
 
     st.markdown("**Preview a table:**")
     sel_table = st.selectbox("Select table to preview", tables)
@@ -1086,7 +1112,7 @@ elif tab == "⚙️ Data Management":
 
     try:
         preview = query(f"SELECT * FROM {sel_table} LIMIT {n_rows}")
-        st.dataframe(preview, use_container_width=True, hide_index=True)
+        st.dataframe(preview, width='stretch', hide_index=True)
         st.caption(
             f"Showing {len(preview)} of {counts[sel_table]} "
             f"total records in `{sel_table}`."

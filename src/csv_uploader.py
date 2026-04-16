@@ -14,15 +14,18 @@ import numpy as np
 import os
 from datetime import datetime
 
+import os
+
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite")
+IS_POSTGRES  = DATABASE_URL.startswith("postgresql")
+
+# Use db_adapter instead of direct sqlite3 calls
+from db_adapter import query, execute, executemany, get_connection
+
 # ── Path config ────────────────────────────────────────────
 DB_PATH      = r"C:\Users\USER\Projects\TradeFlow\data\tradeflow.db"
 UPLOAD_DIR   = r"C:\Users\USER\Projects\TradeFlow\data\raw"
 
-def get_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.row_factory = sqlite3.Row
-    return conn
 
 
 # ══════════════════════════════════════════════════════════
