@@ -10,45 +10,25 @@ Usage:
 """
 
 import streamlit as st
-import sqlite3
-import pandas as pd
 import os
 
-# ── DB path ────────────────────────────────────────────────
-DB_PATH = r"C:\Users\USER\Projects\TradeFlow\data\tradeflow.db"
-
-def _get_db_path():
-    """Get DB path — local SQLite or from environment."""
-    database_url = os.environ.get("DATABASE_URL", "sqlite")
-    if database_url.startswith("postgresql") or database_url.startswith("postgres"):
-        return None  # Signal to use PostgreSQL
-    return DB_PATH
-
-
 def _query(sql, params=()):
-    """Simple query helper."""
-    db = _get_db_path()
-    if db:
-        conn = sqlite3.connect(db, timeout=10)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.row_factory = sqlite3.Row
-        df = pd.read_sql(sql, conn, params=params)
-        conn.close()
-        return df
-    else:
-        # PostgreSQL path
+    """Query using the db_adapter — works on both SQLite and PostgreSQL."""
+    try:
+        # Load DATABASE_URL from Streamlit secrets if available
         try:
-            import psycopg2
-            database_url = os.environ.get("DATABASE_URL")
-            conn = psycopg2.connect(database_url)
-            sql_pg = sql.replace("?", "%s")
-            df = pd.read_sql(sql_pg, conn, params=params if params else None)
-            conn.close()
-            return df
-        except Exception as e:
-            st.error(f"Database connection failed: {e}")
-            return pd.DataFrame()
+            os.environ["DATABASE_URL"] = st.secrets["database"]["DATABASE_URL"]
+        except (KeyError, FileNotFoundError, AttributeError):
+            pass
 
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+        from db_adapter import query as adapter_query
+        return adapter_query(sql, params)
+    except Exception as e:
+        st.error(f"Database error in auth: {e}")
+        import pandas as pd
+        return pd.DataFrame()
 
 # ══════════════════════════════════════════════════════════
 # ADMIN LOGIN
@@ -103,7 +83,7 @@ def require_admin_login():
         password = st.text_input("Password", type="password",
                                  placeholder="Enter your password")
 
-        if st.button("Login →", type="primary", use_container_width=True):
+        if st.button("Login →", type="primary", width='stretch'):
             # Get credentials from secrets
             try:
                 valid_user = st.secrets["auth"]["admin_username"]
@@ -158,7 +138,7 @@ def require_agent_login():
             help="The number you registered with your supervisor."
         )
 
-        if st.button("Login →", type="primary", use_container_width=True):
+        if st.button("Login →", type="primary", width='stretch'):
             if not phone.strip():
                 st.warning("Please enter your phone number.")
             else:
