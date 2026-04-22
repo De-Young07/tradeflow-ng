@@ -35,27 +35,43 @@ def _query(sql, params=()):
 # ══════════════════════════════════════════════════════════
 
 def require_admin_login():
-    """
-    Show admin login screen if not authenticated.
-    Returns True if authenticated, False otherwise.
-    Call at the top of app.py before any content.
-
-    Credentials stored in .streamlit/secrets.toml:
-        [auth]
-        admin_username = "admin"
-        admin_password = "your_password"
-    """
-    # Check if already logged in
-    if st.session_state.get("admin_authenticated"):
-        # Show logout in sidebar
+    # Must check BEFORE any other rendering
+    if st.session_state.get("admin_authenticated") is True:
         with st.sidebar:
             st.divider()
             st.caption(f"Logged in as **{st.session_state.get('admin_user', 'Admin')}**")
             if st.button("🚪 Logout", key="admin_logout"):
-                st.session_state.admin_authenticated = False
-                st.session_state.admin_user = None
+                st.session_state["admin_authenticated"] = False
+                st.session_state["admin_user"] = None
                 st.rerun()
         return True
+
+    # Show login form
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("## 🌾 TradeFlow NG")
+        st.markdown("### Admin Login")
+        st.divider()
+
+        username = st.text_input("Username", key="login_user")
+        password = st.text_input("Password", type="password", key="login_pass")
+
+        if st.button("Login →", type="primary", use_container_width=True, key="login_btn"):
+            try:
+                valid_user = st.secrets["auth"]["admin_username"]
+                valid_pass = st.secrets["auth"]["admin_password"]
+            except Exception:
+                valid_user = os.environ.get("ADMIN_USERNAME", "admin")
+                valid_pass = os.environ.get("ADMIN_PASSWORD", "tradeflow2026")
+
+            if username.strip() == valid_user and password.strip() == valid_pass:
+                st.session_state["admin_authenticated"] = True
+                st.session_state["admin_user"] = username.strip()
+                st.rerun()
+            else:
+                st.error("❌ Incorrect username or password.")
+
+    return False
 
     # Show login page
     st.markdown("""
