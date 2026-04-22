@@ -65,11 +65,45 @@ def get_db():
 def query(sql, params=()):
     """Execute a SELECT and return a DataFrame. Works on both backends."""
     if IS_POSTGRES:
-        # PostgreSQL uses %s placeholders, SQLite uses ?
         sql_pg = sql.replace("?", "%s")
-        # Fix SQLite-specific functions
-        sql_pg = sql_pg.replace("DATE('now')", "CURRENT_DATE")
-        sql_pg = sql_pg.replace("DATE('now',", "CURRENT_DATE +")
+
+        # Date function translations
+        sql_pg = sql_pg.replace("DATE('now', '-56 days')", "(CURRENT_DATE - INTERVAL '56 days')")
+        sql_pg = sql_pg.replace("DATE('now', '-30 days')", "(CURRENT_DATE - INTERVAL '30 days')")
+        sql_pg = sql_pg.replace("DATE('now', '-7 days')",  "(CURRENT_DATE - INTERVAL '7 days')")
+        sql_pg = sql_pg.replace("DATE('now', '+1 day')",   "(CURRENT_DATE + INTERVAL '1 day')")
+        sql_pg = sql_pg.replace("DATE('now','-56 days')",  "(CURRENT_DATE - INTERVAL '56 days')")
+        sql_pg = sql_pg.replace("DATE('now','-30 days')",  "(CURRENT_DATE - INTERVAL '30 days')")
+        sql_pg = sql_pg.replace("DATE('now','-7 days')",   "(CURRENT_DATE - INTERVAL '7 days')")
+        sql_pg = sql_pg.replace("DATE('now','+1 day')",    "(CURRENT_DATE + INTERVAL '1 day')")
+        sql_pg = sql_pg.replace("DATE('now')",             "CURRENT_DATE")
+
+        # Boolean translations — SQLite uses 1/0, PostgreSQL uses TRUE/FALSE
+        sql_pg = sql_pg.replace("is_active = 1",       "is_active = TRUE")
+        sql_pg = sql_pg.replace("is_active=1",         "is_active = TRUE")
+        sql_pg = sql_pg.replace("is_active = 0",       "is_active = FALSE")
+        sql_pg = sql_pg.replace("is_active=0",         "is_active = FALSE")
+        sql_pg = sql_pg.replace("is_hub = 1",          "is_hub = TRUE")
+        sql_pg = sql_pg.replace("is_hub = 0",          "is_hub = FALSE")
+        sql_pg = sql_pg.replace("is_outlier = 0",      "is_outlier = FALSE")
+        sql_pg = sql_pg.replace("is_outlier = 1",      "is_outlier = TRUE")
+        sql_pg = sql_pg.replace("is_confirmed = 1",    "is_confirmed = TRUE")
+        sql_pg = sql_pg.replace("is_confirmed = 0",    "is_confirmed = FALSE")
+        sql_pg = sql_pg.replace("is_shock_flagged = 0","is_shock_flagged = FALSE")
+        sql_pg = sql_pg.replace("is_shock_flagged = 1","is_shock_flagged = TRUE")
+        sql_pg = sql_pg.replace("is_backhaul = 0",     "is_backhaul = FALSE")
+        sql_pg = sql_pg.replace("is_backhaul = 1",     "is_backhaul = TRUE")
+
+        # String concat translation
+        sql_pg = sql_pg.replace(
+            "state_id || commodity_id",
+            "CAST(state_id AS TEXT) || CAST(commodity_id AS TEXT)"
+        )
+
+        # INSERT translations
+        sql_pg = sql_pg.replace("INSERT OR IGNORE", "INSERT")
+        sql_pg = sql_pg.replace("INSERT OR REPLACE", "INSERT")
+
         conn = get_connection()
         try:
             return pd.read_sql(sql_pg, conn, params=params if params else None)
@@ -90,6 +124,10 @@ def execute(sql, params=()):
         sql_pg = sql_pg.replace("DATE('now')", "CURRENT_DATE")
         sql_pg = sql_pg.replace("INSERT OR IGNORE", "INSERT")
         sql_pg = sql_pg.replace("INSERT OR REPLACE", "INSERT")
+        sql_pg = sql_pg.replace("is_active = 1",    "is_active = TRUE")
+        sql_pg = sql_pg.replace("is_active = 0",    "is_active = FALSE")
+        sql_pg = sql_pg.replace("is_confirmed = 1", "is_confirmed = TRUE")
+        sql_pg = sql_pg.replace("is_outlier = 0",   "is_outlier = FALSE")
         with get_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql_pg, params if params else None)
