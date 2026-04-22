@@ -14,6 +14,16 @@ from datetime import date, timedelta
 import sys, os
 
 
+
+# Initialise session state keys before any rendering
+for _key, _default in [
+    ("admin_authenticated", False),
+    ("admin_user", None),
+]:
+    if _key not in st.session_state:
+        st.session_state[_key] = _default
+
+
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from auth import require_admin_login
