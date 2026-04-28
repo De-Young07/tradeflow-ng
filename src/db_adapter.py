@@ -187,28 +187,4 @@ def is_postgres():
 
 
 def backend_name():
-    return "PostgreSQL" if IS_POSTGRES else "SQLite"                cur.execute(sql_pg, params if params else None)
-    else:
-        with get_db() as conn:
-            conn.execute(sql, params)
-
-
-def executemany(sql, params_list):
-    """Execute batch INSERT. Works on both backends."""
-    if IS_POSTGRES:
-        sql_pg = sql.replace("?", "%s")
-        sql_pg = sql_pg.replace("INSERT OR IGNORE", "INSERT")
-        with get_db() as conn:
-            with conn.cursor() as cur:
-                psycopg2.extras.execute_batch(cur, sql_pg, params_list)
-    else:
-        with get_db() as conn:
-            conn.executemany(sql, params_list)
-
-
-def is_postgres():
-    return IS_POSTGRES
-
-
-def backend_name():
     return "PostgreSQL" if IS_POSTGRES else "SQLite"
