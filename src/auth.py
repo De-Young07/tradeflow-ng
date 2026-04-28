@@ -1,26 +1,23 @@
 """
 TradeFlow NG — Authentication Module
-Handles login for both admin and agent dashboards.
 
-Admin:  username + password (from st.secrets)
-Agents: phone number (must exist in agents table)
+Admin:  username + password (stored in st.secrets [auth])
+Agents: phone number (looked up in agents table)
 
 Usage:
-    from auth import require_admin_login, require_agent_login
+    from auth import require_admin_login, require_agent_login, agent_logout
 """
 
-import streamlit as st
 import os
+import streamlit as st
+
 
 def _query(sql, params=()):
-    """Query using the db_adapter — works on both SQLite and PostgreSQL."""
+    """
+    Auth-safe query — always routes through db_adapter
+    so all SQLite→PostgreSQL translations apply automatically.
+    """
     try:
-        # Load DATABASE_URL from Streamlit secrets if available
-        try:
-            os.environ["DATABASE_URL"] = st.secrets["database"]["DATABASE_URL"]
-        except (KeyError, FileNotFoundError, AttributeError):
-            pass
-
         import sys
         sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
         from db_adapter import query as adapter_query
@@ -30,64 +27,37 @@ def _query(sql, params=()):
         import pandas as pd
         return pd.DataFrame()
 
-# ══════════════════════════════════════════════════════════
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ADMIN LOGIN
-# ══════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 
 def require_admin_login():
-    # Must check BEFORE any other rendering
-    if st.session_state.get("admin_authenticated") is True:
+    """
+    Call at the top of app.py BEFORE any other content.
+    Returns True if authenticated, False if showing the login form.
+    """
+
+    # ── Initialise session keys exactly once ──────────────────
+    if "admin_authenticated" not in st.session_state:
+        st.session_state["admin_authenticated"] = False
+    if "admin_user" not in st.session_state:
+        st.session_state["admin_user"] = None
+
+    # ── Already authenticated — show logout and return ────────
+    if st.session_state["admin_authenticated"] is True:
         with st.sidebar:
             st.divider()
-            st.caption(f"Logged in as **{st.session_state.get('admin_user', 'Admin')}**")
+            st.caption(
+                f"Logged in as **{st.session_state.get('admin_user', 'Admin')}**"
+            )
             if st.button("🚪 Logout", key="admin_logout"):
                 st.session_state["admin_authenticated"] = False
                 st.session_state["admin_user"] = None
                 st.rerun()
         return True
 
-    # Show login form
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.markdown("## 🌾 TradeFlow NG")
-        st.markdown("### Admin Login")
-        st.divider()
-
-        username = st.text_input("Username", key="login_user")
-        password = st.text_input("Password", type="password", key="login_pass")
-
-        if st.button("Login →", type="primary", use_container_width=True, key="login_btn"):
-            try:
-                valid_user = st.secrets["auth"]["admin_username"]
-                valid_pass = st.secrets["auth"]["admin_password"]
-            except Exception:
-                valid_user = os.environ.get("ADMIN_USERNAME", "admin")
-                valid_pass = os.environ.get("ADMIN_PASSWORD", "tradeflow2026")
-
-            if username.strip() == valid_user and password.strip() == valid_pass:
-                st.session_state["admin_authenticated"] = True
-                st.session_state["admin_user"] = username.strip()
-                st.rerun()
-            else:
-                st.error("❌ Incorrect username or password.")
-
-    return False
-
-    # Show login page
-    st.markdown("""
-    <style>
-    .login-container {
-        max-width: 420px;
-        margin: 80px auto;
-        padding: 40px;
-        background: white;
-        border-radius: 16px;
-        border: 1px solid #D5E8DC;
-        box-shadow: 0 4px 24px rgba(0,0,0,0.08);
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
+    # ── Show login form ───────────────────────────────────────
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("## 🌾 TradeFlow NG")
@@ -95,52 +65,82 @@ def require_admin_login():
         st.caption("Internal Control Dashboard")
         st.divider()
 
-        username = st.text_input("Username", placeholder="admin")
-        password = st.text_input("Password", type="password",
-                                 placeholder="Enter your password")
+        # Use unique keys so Streamlit does not re-render on unrelated reruns
+        username = st.text_input(
+            "Username",
+            placeholder="admin",
+            key="auth_username_input"
+        )
+        password = st.text_input(
+            "Password",
+            type="password",
+            placeholder="Enter your password",
+            key="auth_password_input"
+        )
 
-        if st.button("Login →", type="primary", width='stretch'):
-            # Get credentials from secrets
+        login_clicked = st.button(
+            "Login →",
+            type="primary",
+            use_container_width=True,
+            key="auth_login_button"
+        )
+
+        if login_clicked:
+            # Read credentials from secrets (Streamlit Cloud) or env (local)
             try:
                 valid_user = st.secrets["auth"]["admin_username"]
                 valid_pass = st.secrets["auth"]["admin_password"]
-            except (KeyError, FileNotFoundError):
-                # Fallback for local development without secrets file
+            except Exception:
                 valid_user = os.environ.get("ADMIN_USERNAME", "admin")
                 valid_pass = os.environ.get("ADMIN_PASSWORD", "tradeflow2026")
 
-            if username == valid_user and password == valid_pass:
-                st.session_state.admin_authenticated = True
-                st.session_state.admin_user = username
+            # Strip whitespace — prevents invisible character mismatch
+            if username.strip() == valid_user.strip() and \
+               password.strip() == valid_pass.strip():
+                st.session_state["admin_authenticated"] = True
+                st.session_state["admin_user"] = username.strip()
                 st.rerun()
             else:
                 st.error("❌ Incorrect username or password.")
 
         st.divider()
-        st.caption("Contact your system administrator if you've forgotten your credentials.")
+        st.caption("Contact your system administrator if you have forgotten your credentials.")
 
     return False
 
 
-# ══════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 # AGENT LOGIN
-# ══════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 
 def require_agent_login():
     """
-    Show agent login screen if not authenticated.
-    Agents log in with their registered phone number.
-    Returns (True, agent_data) if authenticated, (False, None) otherwise.
+    Call at the top of agent_app.py BEFORE any other content.
+    Returns (True, agent_data_dict) or (False, None).
     """
-    if st.session_state.get("agent_authenticated"):
+
+    # ── Initialise session keys exactly once ──────────────────
+    defaults = {
+        "agent_authenticated": False,
+        "agent_id":            None,
+        "agent_name":          None,
+        "agent_state":         None,
+        "agent_state_id":      None,
+    }
+    for key, default in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = default
+
+    # ── Already authenticated ─────────────────────────────────
+    if st.session_state["agent_authenticated"] is True:
         return True, {
-            "agent_id":       st.session_state.agent_id,
-            "agent_name":     st.session_state.agent_name,
-            "agent_state":    st.session_state.agent_state,
-            "agent_state_id": st.session_state.agent_state_id,
+            "agent_id":       st.session_state["agent_id"],
+            "agent_name":     st.session_state["agent_name"],
+            "agent_state":    st.session_state["agent_state"],
+            "agent_state_id": st.session_state["agent_state_id"],
         }
 
-    # Agents don't have a sidebar — show centered login
+    # ── Show login form ───────────────────────────────────────
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("## 🌾 TradeFlow NG")
@@ -151,33 +151,46 @@ def require_agent_login():
         phone = st.text_input(
             "Phone number",
             placeholder="08012345678",
+            key="agent_phone_input",
             help="The number you registered with your supervisor."
         )
 
-        if st.button("Login →", type="primary", width='stretch'):
-            if not phone.strip():
+        login_clicked = st.button(
+            "Login →",
+            type="primary",
+            use_container_width=True,
+            key="agent_login_button"
+        )
+
+        if login_clicked:
+            phone_clean = phone.strip()
+            if not phone_clean:
                 st.warning("Please enter your phone number.")
             else:
+                # Query uses db_adapter which applies is_active = TRUE translation
                 agent = _query(
                     "SELECT * FROM agents WHERE phone = ? AND is_active = 1",
-                    (phone.strip(),)
+                    (phone_clean,)
                 )
 
                 if not agent.empty:
                     a = agent.iloc[0]
+
                     state_row = _query(
                         "SELECT id, name FROM states WHERE id = ?",
                         (int(a["state_id"]),)
                     )
 
-                    st.session_state.agent_authenticated = True
-                    st.session_state.agent_id            = int(a["id"])
-                    st.session_state.agent_name          = a["full_name"]
-                    st.session_state.agent_state         = (
-                        state_row.iloc[0]["name"] if not state_row.empty else "—"
+                    st.session_state["agent_authenticated"] = True
+                    st.session_state["agent_id"]            = int(a["id"])
+                    st.session_state["agent_name"]          = str(a["full_name"])
+                    st.session_state["agent_state"]         = (
+                        str(state_row.iloc[0]["name"])
+                        if not state_row.empty else "—"
                     )
-                    st.session_state.agent_state_id      = (
-                        int(state_row.iloc[0]["id"]) if not state_row.empty else None
+                    st.session_state["agent_state_id"] = (
+                        int(state_row.iloc[0]["id"])
+                        if not state_row.empty else None
                     )
                     st.rerun()
                 else:
@@ -192,9 +205,15 @@ def require_agent_login():
     return False, None
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# LOGOUT
+# ══════════════════════════════════════════════════════════════════════════════
+
 def agent_logout():
-    """Clear agent session."""
-    for key in ["agent_authenticated", "agent_id",
-                "agent_name", "agent_state", "agent_state_id"]:
+    """Clear agent session state completely."""
+    for key in [
+        "agent_authenticated", "agent_id",
+        "agent_name", "agent_state", "agent_state_id"
+    ]:
         st.session_state[key] = None
-    st.session_state.agent_authenticated = False
+    st.session_state["agent_authenticated"] = False
