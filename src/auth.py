@@ -60,7 +60,11 @@ def require_admin_login():
     # ── Show login form ───────────────────────────────────────
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("## 🌾 TradeFlow NG")
+        logo_path = os.path.join(os.path.dirname(__file__), '..', 'dashboard', 'assets', 'logo-full.png')
+        if os.path.exists(logo_path):
+            st.image(logo_path, width=200)
+        else:
+            st.markdown("## 🌾 TradeFlow NG")
         st.markdown("### Admin Login")
         st.caption("Internal Control Dashboard")
         st.divider()
@@ -143,7 +147,11 @@ def require_agent_login():
     # ── Show login form ───────────────────────────────────────
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("## 🌾 TradeFlow NG")
+        logo_path = os.path.join(os.path.dirname(__file__), '..', 'dashboard', 'assets', 'logo-full.png')
+        if os.path.exists(logo_path):
+            st.image(logo_path, width=200)
+        else:
+            st.markdown("## 🌾 TradeFlow NG")
         st.markdown("### Agent Login")
         st.caption("Enter your registered phone number to continue.")
         st.divider()
