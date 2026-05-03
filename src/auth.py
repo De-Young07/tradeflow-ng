@@ -60,7 +60,7 @@ def require_admin_login():
     # ── Show login form ───────────────────────────────────────
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        logo_path = os.path.join(os.path.dirname(__file__), '..', 'dashboard', 'assets', 'logo-full.png')
+        logo_path = os.path.join(os.path.dirname(__file__), '..', 'dashboard', 'assets', 'TradeFlow profile.png')
         if os.path.exists(logo_path):
             st.image(logo_path, width=200)
         else:
@@ -147,7 +147,7 @@ def require_agent_login():
     # ── Show login form ───────────────────────────────────────
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        logo_path = os.path.join(os.path.dirname(__file__), '..', 'dashboard', 'assets', 'logo-full.png')
+        logo_path = os.path.join(os.path.dirname(__file__), '..', 'dashboard', 'assets', 'TradeFlow dark.png')
         if os.path.exists(logo_path):
             st.image(logo_path, width=200)
         else:
