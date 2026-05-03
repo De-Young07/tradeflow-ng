@@ -14,6 +14,11 @@ from datetime import date, timedelta
 import sys, os
 
 
+try:
+    db_url = st.secrets["database"]["DATABASE_URL"]
+    os.environ["DATABASE_URL"] = db_url
+except (KeyError, FileNotFoundError):
+    pass  # Falls back to SQLite locally
 
 # Initialise session state keys before any rendering
 for _key, _default in [
@@ -29,13 +34,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from auth import require_admin_login
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-
-# Read DATABASE_URL from Streamlit secrets or environment
-try:
-    db_url = st.secrets["database"]["DATABASE_URL"]
-    os.environ["DATABASE_URL"] = db_url
-except (KeyError, FileNotFoundError):
-    pass  # Falls back to SQLite locally
 
 st.set_page_config(
     page_title="TradeFlow NG",
