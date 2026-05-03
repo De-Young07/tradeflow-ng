@@ -39,7 +39,7 @@ except (KeyError, FileNotFoundError):
 
 st.set_page_config(
     page_title="TradeFlow NG",
-    page_icon="🌾",
+    page_icon="https://raw.githubusercontent.com/De-Young07/tradeflow-ng/main/assets/TradeFlow logo.png",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -169,6 +169,14 @@ if not require_admin_login():
 # ══════════════════════════════════════════════════════════
 # SIDEBAR
 # ══════════════════════════════════════════════════════════
+
+with st.sidebar:
+    st.image(
+        "https://raw.githubusercontent.com/De-Young07/tradeflow-ng/main/assets/TradeFlow profile.png",
+        width=180,
+    )
+    st.divider()
+    # ... rest of sidebar
 
 with st.sidebar:
     st.image("https://img.icons8.com/emoji/48/sheaf-of-rice.png", width=48)
