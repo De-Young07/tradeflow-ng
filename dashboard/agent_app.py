@@ -14,11 +14,13 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from auth import require_agent_login, agent_logout
 
+LOGO_FULL = os.path.join(os.path.dirname(__file__), 'assets', 'logo-full.png')
+LOGO_ICON = os.path.join(os.path.dirname(__file__), 'assets', 'logo-icon.png')
+
 st.set_page_config(
     page_title="TradeFlow NG — Agent",
-    page_icon="🌾",
+    page_icon=LOGO_ICON,
     layout="centered",
-    initial_sidebar_state="collapsed",
 )
 
 DB_PATH = r"C:\Users\USER\Projects\TradeFlow\data\tradeflow.db"
@@ -472,7 +474,10 @@ sid         = agent_data["agent_state_id"]
 # ══════════════════════════════════════════════════════════
 # LOGGED IN — VARIABLES
 # ══════════════════════════════════════════════════════════
-
+col_logo, col_spacer = st.columns([1, 3])
+with col_logo:
+    if os.path.exists(LOGO_FULL):
+        st.image(LOGO_FULL, width=160)
 
 # ── Hero header ──────────────────────────────────────────
 
