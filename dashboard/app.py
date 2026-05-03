@@ -20,6 +20,8 @@ try:
 except (KeyError, FileNotFoundError):
     pass  # Falls back to SQLite locally
 
+from db_adapter import query, execute, get_connection
+
 # Initialise session state keys before any rendering
 for _key, _default in [
     ("admin_authenticated", False),
