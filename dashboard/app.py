@@ -4,6 +4,11 @@ Fully native Streamlit components. No custom HTML cards.
 Robust, clean, and maintainable.
 """
 
+# TOP OF APP — Before any other imports
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
 import streamlit as st
 import sqlite3
 import pandas as pd
@@ -11,17 +16,25 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import date, timedelta
-import sys, os
 
-
+# Now try to get the database URL
 try:
     db_url = st.secrets["database"]["DATABASE_URL"]
     os.environ["DATABASE_URL"] = db_url
 except (KeyError, FileNotFoundError):
-    pass  # Falls back to SQLite locally
+    pass
 
+# NOW this import will work
 from db_adapter import query, execute, get_connection
 
+from database import init_database
+
+# Initialize database on first run
+try:
+    init_database()
+except Exception as e:
+    st.warning(f"Database check: {e}")
+    
 # Initialise session state keys before any rendering
 for _key, _default in [
     ("admin_authenticated", False),
