@@ -1,6 +1,7 @@
+# src/db_adapter.py
 """
 TradeFlow NG — Database Adapter
-Handles both SQLite (local) and PostgreSQL (cloud).
+Optimized for Supabase PostgreSQL with SQLite fallback
 
 Switch by setting DATABASE_URL environment variable:
   - Not set / "sqlite"  → local SQLite
@@ -13,12 +14,16 @@ import os
 import sqlite3
 import pandas as pd
 from contextlib import contextmanager
+import re
 
-# ── Detect environment ─────────────────────────────────────────────────────────
+# ── Detect environment ────────────────────────────────────────────────────────
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite")
-SQLITE_PATH  = r"C:\Users\USER\Projects\TradeFlow\data\tradeflow.db"
-IS_POSTGRES  = DATABASE_URL.startswith("postgresql") or \
-               DATABASE_URL.startswith("postgres")
+
+# Dynamic SQLite path — works on Windows, Mac, Linux, and Streamlit Cloud
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SQLITE_PATH = os.path.join(BASE_DIR, "data", "tradeflow.db")
+
+IS_POSTGRES = DATABASE_URL.startswith("postgresql") or DATABASE_URL.startswith("postgres")
 
 if IS_POSTGRES:
     try:
@@ -28,62 +33,79 @@ if IS_POSTGRES:
         raise ImportError("psycopg2 not installed. Run: pip install psycopg2-binary")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 # SQL TRANSLATION — SQLite syntax → PostgreSQL syntax
-# Applied to every query before it reaches PostgreSQL.
-# ══════════════════════════════════════════════════════════════════════════════
+# Applied to every query before it reaches PostgreSQL/Supabase.
+# ════════════════════════════════════════════════════════════════════════════════
 
 def _translate(sql):
     """
     Translate SQLite-specific SQL syntax to PostgreSQL.
-    Covers: placeholders, date functions, boolean literals,
-    string concat, INSERT variants, and type casts.
+    Comprehensive fixes for:
+    1. Placeholders (? → %s)
+    2. Date functions
+    3. Boolean literals (0/1 → FALSE/TRUE) for bare AND qualified columns
+    4. COALESCE boolean/integer mismatches
+    5. Single-quoted column aliases → double-quoted
+    6. String concatenation
+    7. INSERT variants
+    8. Type casts
     """
     s = sql
 
     # 1. Placeholders
     s = s.replace("?", "%s")
 
-    # 2. Date functions — with space variants and without
-    s = s.replace("DATE('now', '-56 days')", "(CURRENT_DATE - INTERVAL '56 days')")
-    s = s.replace("DATE('now', '-30 days')", "(CURRENT_DATE - INTERVAL '30 days')")
-    s = s.replace("DATE('now', '-14 days')", "(CURRENT_DATE - INTERVAL '14 days')")
-    s = s.replace("DATE('now', '-7 days')",  "(CURRENT_DATE - INTERVAL '7 days')")
-    s = s.replace("DATE('now', '-1 day')",   "(CURRENT_DATE - INTERVAL '1 day')")
-    s = s.replace("DATE('now', '+1 day')",   "(CURRENT_DATE + INTERVAL '1 day')")
-    s = s.replace("DATE('now', '+7 days')",  "(CURRENT_DATE + INTERVAL '7 days')")
-    s = s.replace("DATE('now','-56 days')",  "(CURRENT_DATE - INTERVAL '56 days')")
-    s = s.replace("DATE('now','-30 days')",  "(CURRENT_DATE - INTERVAL '30 days')")
-    s = s.replace("DATE('now','-14 days')",  "(CURRENT_DATE - INTERVAL '14 days')")
-    s = s.replace("DATE('now','-7 days')",   "(CURRENT_DATE - INTERVAL '7 days')")
-    s = s.replace("DATE('now','-1 day')",    "(CURRENT_DATE - INTERVAL '1 day')")
-    s = s.replace("DATE('now','+1 day')",    "(CURRENT_DATE + INTERVAL '1 day')")
-    s = s.replace("DATE('now','+7 days')",   "(CURRENT_DATE + INTERVAL '7 days')")
-    s = s.replace("DATE('now')",             "CURRENT_DATE")
+    # 2. Date functions
+    date_patterns = [
+        ("DATE('now', '-56 days')", "(CURRENT_DATE - INTERVAL '56 days')"),
+        ("DATE('now', '-30 days')", "(CURRENT_DATE - INTERVAL '30 days')"),
+        ("DATE('now', '-14 days')", "(CURRENT_DATE - INTERVAL '14 days')"),
+        ("DATE('now', '-7 days')", "(CURRENT_DATE - INTERVAL '7 days')"),
+        ("DATE('now', '-1 day')", "(CURRENT_DATE - INTERVAL '1 day')"),
+        ("DATE('now', '+1 day')", "(CURRENT_DATE + INTERVAL '1 day')"),
+        ("DATE('now', '+7 days')", "(CURRENT_DATE + INTERVAL '7 days')"),
+        ("DATE('now','-56 days')", "(CURRENT_DATE - INTERVAL '56 days')"),
+        ("DATE('now','-30 days')", "(CURRENT_DATE - INTERVAL '30 days')"),
+        ("DATE('now','-14 days')", "(CURRENT_DATE - INTERVAL '14 days')"),
+        ("DATE('now','-7 days')", "(CURRENT_DATE - INTERVAL '7 days')"),
+        ("DATE('now','-1 day')", "(CURRENT_DATE - INTERVAL '1 day')"),
+        ("DATE('now','+1 day')", "(CURRENT_DATE + INTERVAL '1 day')"),
+        ("DATE('now','+7 days')", "(CURRENT_DATE + INTERVAL '7 days')"),
+        ("DATE('now')", "CURRENT_DATE"),
+    ]
+    for sqlite_pattern, pg_pattern in date_patterns:
+        s = s.replace(sqlite_pattern, pg_pattern)
 
-    # 3. Boolean columns — SQLite uses 0/1, PostgreSQL uses TRUE/FALSE
-    #    Must use word boundaries to avoid partial replacements.
-    #    Order matters: longer patterns first.
+    # 3. Boolean columns — handle BOTH bare names AND qualified names
     bool_cols = [
         "is_active", "is_hub", "is_outlier", "is_confirmed",
         "is_shock_flagged", "is_backhaul", "is_perishable",
-        "missing_cost_flag", "corr.is_active",
+        "missing_cost_flag",
     ]
-    for col in bool_cols:
-        s = s.replace(f"{col} = 1",   f"{col} = TRUE")
-        s = s.replace(f"{col}=1",     f"{col} = TRUE")
-        s = s.replace(f"{col} = 0",   f"{col} = FALSE")
-        s = s.replace(f"{col}=0",     f"{col} = FALSE")
+    
+    # Add qualified versions for common table aliases
+    qualified_prefixes = ["f.", "r.", "ao.", "c.", "cp.", "s.", "corr.", "co.", "tc.", "t."]
+    qualified_cols = [f"{prefix}{col}" for prefix in qualified_prefixes for col in bool_cols]
+    all_cols = bool_cols + qualified_cols
+
+    # Replace boolean literals (0/1 → FALSE/TRUE)
+    for col in all_cols:
+        s = s.replace(f"{col} = 1", f"{col} = TRUE")
+        s = s.replace(f"{col}=1", f"{col} = TRUE")
+        s = s.replace(f"{col} = 0", f"{col} = FALSE")
+        s = s.replace(f"{col}=0", f"{col} = FALSE")
         s = s.replace(f"{col} = '1'", f"{col} = TRUE")
         s = s.replace(f"{col} = '0'", f"{col} = FALSE")
+        # Handle CASE statements
+        s = s.replace(f"THEN 1 ELSE 0 END AS {col}", f"THEN TRUE ELSE FALSE END AS {col}")
 
-    # 4. COALESCE with integer defaults for boolean columns
-    for col in bool_cols:
-        s = s.replace(f"COALESCE({col}, 0)",   f"COALESCE({col}, FALSE)")
-        s = s.replace(f"COALESCE({col}, 1)",   f"COALESCE({col}, TRUE)")
+    # 4. COALESCE with boolean defaults — handle ALL column variations
+    for col in all_cols:
+        s = s.replace(f"COALESCE({col}, 0)", f"COALESCE({col}, FALSE)")
+        s = s.replace(f"COALESCE({col}, 1)", f"COALESCE({col}, TRUE)")
 
-    # 5. String concatenation — SQLite || works but needs explicit cast
-    #    when mixing integer columns
+    # 5. String concatenation
     s = s.replace(
         "state_id || commodity_id",
         "CAST(state_id AS TEXT) || CAST(commodity_id AS TEXT)"
@@ -93,29 +115,41 @@ def _translate(sql):
         "CAST(cp.state_id AS TEXT) || CAST(cp.commodity_id AS TEXT)"
     )
 
-    # 6. INSERT variants
+    # 6. Convert single-quoted column aliases to double-quoted identifiers
+    #    Pattern: AS 'Column Name' → AS "Column Name"
+    s = re.sub(r"\bAS\s+'([^']+)'", r'AS "\1"', s)
+
+    # 7. INSERT variants
     s = s.replace("INSERT OR IGNORE INTO", "INSERT INTO")
     s = s.replace("INSERT OR REPLACE INTO", "INSERT INTO")
-    s = s.replace("INSERT OR IGNORE",       "INSERT")
-    s = s.replace("INSERT OR REPLACE",      "INSERT")
+    s = s.replace("INSERT OR IGNORE", "INSERT")
+    s = s.replace("INSERT OR REPLACE", "INSERT")
 
-    # 7. SQLite-specific type affinity casts that break PostgreSQL
-    s = s.replace("CAST(is_active AS INTEGER)",       "is_active::int")
+    # 8. Type casts
+    s = s.replace("CAST(is_active AS INTEGER)", "is_active::int")
     s = s.replace("CAST(is_shock_flagged AS INTEGER)", "is_shock_flagged::int")
-    s = s.replace("CAST(is_backhaul AS INTEGER)",      "is_backhaul::int")
+    s = s.replace("CAST(is_backhaul AS INTEGER)", "is_backhaul::int")
 
     return s
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 # CONNECTION
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 def get_connection():
     """Return a live database connection."""
     if IS_POSTGRES:
-        return psycopg2.connect(DATABASE_URL)
+        try:
+            return psycopg2.connect(DATABASE_URL)
+        except Exception as e:
+            raise ConnectionError(
+                f"Failed to connect to Supabase PostgreSQL. "
+                f"Check DATABASE_URL in secrets. Error: {e}"
+            )
     else:
+        # Ensure data directory exists
+        os.makedirs(os.path.dirname(SQLITE_PATH), exist_ok=True)
         conn = sqlite3.connect(SQLITE_PATH, timeout=15)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys = ON")
@@ -137,9 +171,9 @@ def get_db():
         conn.close()
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══���═════════════════════════════════════════════════════════════════════════════
 # PUBLIC API
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 def query(sql, params=()):
     """Execute a SELECT and return a DataFrame."""
@@ -187,4 +221,4 @@ def is_postgres():
 
 
 def backend_name():
-    return "PostgreSQL" if IS_POSTGRES else "SQLite"
+    return "PostgreSQL (Supabase)" if IS_POSTGRES else "SQLite"
