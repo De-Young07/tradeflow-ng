@@ -1,3 +1,4 @@
+# src/auth.py
 """
 TradeFlow NG — Authentication Module
 
@@ -14,8 +15,7 @@ import streamlit as st
 
 def _query(sql, params=()):
     """
-    Auth-safe query — always routes through db_adapter
-    so all SQLite→PostgreSQL translations apply automatically.
+    Auth-safe query — always routes through db_adapter.
     """
     try:
         import sys
@@ -28,9 +28,39 @@ def _query(sql, params=()):
         return pd.DataFrame()
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+def _get_admin_credentials():
+    """
+    Retrieve admin credentials from Streamlit secrets or environment.
+    Handles all possible sources with proper fallbacks.
+    """
+    valid_user = None
+    valid_pass = None
+
+    # Priority 1: Streamlit secrets (Streamlit Cloud)
+    try:
+        if hasattr(st, 'secrets') and 'auth' in st.secrets:
+            valid_user = st.secrets['auth'].get('admin_username')
+            valid_pass = st.secrets['auth'].get('admin_password')
+    except Exception:
+        pass
+
+    # Priority 2: Environment variables
+    if not valid_user or not valid_pass:
+        valid_user = os.environ.get('ADMIN_USERNAME')
+        valid_pass = os.environ.get('ADMIN_PASSWORD')
+
+    # Priority 3: Defaults (local development)
+    if not valid_user:
+        valid_user = 'admin'
+    if not valid_pass:
+        valid_pass = 'tradeflow2026'
+
+    return valid_user, valid_pass
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # ADMIN LOGIN
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 def require_admin_login():
     """
@@ -60,16 +90,18 @@ def require_admin_login():
     # ── Show login form ───────────────────────────────────────
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        logo_path = os.path.join(os.path.dirname(__file__), '..', 'dashboard', 'assets', 'TradeFlow profile.png')
+        logo_path = os.path.join(
+            os.path.dirname(__file__), '..', 'dashboard', 'assets', 'TradeFlow profile.png'
+        )
         if os.path.exists(logo_path):
             st.image(logo_path, width=200)
         else:
             st.markdown("## 🌾 TradeFlow NG")
+        
         st.markdown("### Admin Login")
         st.caption("Internal Control Dashboard")
         st.divider()
 
-        # Use unique keys so Streamlit does not re-render on unrelated reruns
         username = st.text_input(
             "Username",
             placeholder="admin",
@@ -90,17 +122,11 @@ def require_admin_login():
         )
 
         if login_clicked:
-            # Read credentials from secrets (Streamlit Cloud) or env (local)
-            try:
-                valid_user = st.secrets["auth"]["admin_username"]
-                valid_pass = st.secrets["auth"]["admin_password"]
-            except Exception:
-                valid_user = os.environ.get("ADMIN_USERNAME", "admin")
-                valid_pass = os.environ.get("ADMIN_PASSWORD", "tradeflow2026")
+            valid_user, valid_pass = _get_admin_credentials()
 
-            # Strip whitespace — prevents invisible character mismatch
-            if username.strip() == valid_user.strip() and \
-               password.strip() == valid_pass.strip():
+            # Validate credentials — strip whitespace
+            if (username.strip() == valid_user.strip() and 
+                password.strip() == valid_pass.strip()):
                 st.session_state["admin_authenticated"] = True
                 st.session_state["admin_user"] = username.strip()
                 st.rerun()
@@ -113,9 +139,9 @@ def require_admin_login():
     return False
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 # AGENT LOGIN
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 def require_agent_login():
     """
@@ -147,11 +173,14 @@ def require_agent_login():
     # ── Show login form ───────────────────────────────────────
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        logo_path = os.path.join(os.path.dirname(__file__), '..', 'dashboard', 'assets', 'TradeFlow dark.jpg')
+        logo_path = os.path.join(
+            os.path.dirname(__file__), '..', 'dashboard', 'assets', 'TradeFlow dark.jpg'
+        )
         if os.path.exists(logo_path):
             st.image(logo_path, width=200)
         else:
             st.markdown("## 🌾 TradeFlow NG")
+        
         st.markdown("### Agent Login")
         st.caption("Enter your registered phone number to continue.")
         st.divider()
@@ -175,9 +204,11 @@ def require_agent_login():
             if not phone_clean:
                 st.warning("Please enter your phone number.")
             else:
-                # Query uses db_adapter which applies is_active = TRUE translation
+                # Query agents table — PostgreSQL/SQLite compatible
                 agent = _query(
-                    "SELECT * FROM agents WHERE phone = ? AND is_active = 1",
+                    "SELECT * FROM agents WHERE phone = %s AND is_active = TRUE"
+                    if "postgresql" in (os.environ.get("DATABASE_URL", "sqlite"))
+                    else "SELECT * FROM agents WHERE phone = ? AND is_active = 1",
                     (phone_clean,)
                 )
 
@@ -185,14 +216,16 @@ def require_agent_login():
                     a = agent.iloc[0]
 
                     state_row = _query(
-                        "SELECT id, name FROM states WHERE id = ?",
+                        "SELECT id, name FROM states WHERE id = %s"
+                        if "postgresql" in (os.environ.get("DATABASE_URL", "sqlite"))
+                        else "SELECT id, name FROM states WHERE id = ?",
                         (int(a["state_id"]),)
                     )
 
                     st.session_state["agent_authenticated"] = True
-                    st.session_state["agent_id"]            = int(a["id"])
-                    st.session_state["agent_name"]          = str(a["full_name"])
-                    st.session_state["agent_state"]         = (
+                    st.session_state["agent_id"] = int(a["id"])
+                    st.session_state["agent_name"] = str(a["full_name"])
+                    st.session_state["agent_state"] = (
                         str(state_row.iloc[0]["name"])
                         if not state_row.empty else "—"
                     )
@@ -213,9 +246,9 @@ def require_agent_login():
     return False, None
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 # LOGOUT
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 def agent_logout():
     """Clear agent session state completely."""
