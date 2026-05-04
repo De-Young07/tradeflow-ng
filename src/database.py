@@ -1,64 +1,87 @@
+# src/database.py
 """
 TradeFlow NG — Database Initializer
+For SQLite only. PostgreSQL/Supabase schema is set up independently.
 """
 
 import sqlite3
 import os
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite")
-IS_POSTGRES  = DATABASE_URL.startswith("postgresql")
+IS_POSTGRES = DATABASE_URL.startswith("postgresql")
 
-# Use db_adapter instead of direct sqlite3 calls
-from db_adapter import query, execute, executemany, get_connection
-# Paths
+from db_adapter import query, execute, get_connection
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH  = os.path.join(BASE_DIR, "data", "tradeflow.db")
+DB_PATH = os.path.join(BASE_DIR, "data", "tradeflow.db")
 SQL_PATH = os.path.join(BASE_DIR, "tradeflow_schema.sql")
 
+
 def init_database():
-    """Create the database and all tables from schema file."""
-    print(f"Creating database at: {DB_PATH}")
+    """Initialize SQLite database. PostgreSQL/Supabase is pre-configured."""
+    if IS_POSTGRES:
+        print("✅ Using PostgreSQL/Supabase — schema initialization skipped.")
+        print("   Ensure schema_postgresql.sql has been run on your Supabase database.")
+        return
+
+    print(f"Initializing SQLite database at: {DB_PATH}")
 
     # Create data directory if it doesn't exist
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA foreign_keys = ON")  # Enforce foreign keys in SQLite
-
-    with open(SQL_PATH, "r") as f:
-        sql_script = f.read()
-
-    conn.executescript(sql_script)
-    conn.commit()
-    conn.close()
-    print("Database initialized successfully.")
-    print("Tables created with seed data.")
-
-def get_connection():
-    """Return a live database connection. Use this everywhere."""
-    conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.row_factory = sqlite3.Row  # Returns rows as dicts, not tuples
-    return conn
+
+    try:
+        with open(SQL_PATH, "r") as f:
+            sql_script = f.read()
+
+        conn.executescript(sql_script)
+        conn.commit()
+        print("✅ SQLite database initialized successfully.")
+        print("   Tables created with seed data.")
+    except Exception as e:
+        print(f"❌ Error initializing database: {e}")
+        raise
+    finally:
+        conn.close()
+
 
 def test_connection():
     """Verify tables exist and seed data loaded correctly."""
-    conn = get_connection()
-    cursor = conn.cursor()
+    if IS_POSTGRES:
+        print("✅ PostgreSQL connection test:")
+        try:
+            result = query("SELECT COUNT(*) as count FROM states")
+            count = result.iloc[0]["count"] if not result.empty else 0
+            print(f"   States table: {count} records")
+            return True
+        except Exception as e:
+            print(f"❌ PostgreSQL connection failed: {e}")
+            return False
+    else:
+        conn = get_connection()
+        cursor = conn.cursor()
 
-    tables = ["states", "markets", "commodities", "agents",
-              "raw_submissions", "cleaned_prices", "forecasts",
-              "optimization_runs", "optimization_recommendations",
-              "actual_outcomes", "pipeline_logs"]
+        tables = [
+            "states", "markets", "commodities", "agents",
+            "raw_submissions", "cleaned_prices", "forecasts",
+            "optimization_runs", "optimization_recommendations",
+            "actual_outcomes", "pipeline_logs"
+        ]
 
-    print("\n--- DATABASE VERIFICATION ---")
-    for table in tables:
-        cursor.execute(f"SELECT COUNT(*) FROM {table}")
-        count = cursor.fetchone()[0]
-        print(f"  {table:<35} → {count} rows")
+        print("\n--- SQLite DATABASE VERIFICATION ---")
+        for table in tables:
+            try:
+                cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                count = cursor.fetchone()[0]
+                print(f"  {table:<35} → {count} rows")
+            except Exception as e:
+                print(f"  {table:<35} → ❌ Error: {e}")
 
-    conn.close()
-    print("----------------------------\n")
+        conn.close()
+        print("-----------------------------------\n")
+
 
 if __name__ == "__main__":
     init_database()
