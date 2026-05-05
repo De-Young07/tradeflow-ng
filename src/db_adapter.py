@@ -1,13 +1,13 @@
-# src/db_adapter.py
+# COMPLETE FILE: src/db_adapter.py
+# Replace the entire file with this content
+
 """
 TradeFlow NG — Database Adapter
-Optimized for Supabase PostgreSQL with SQLite fallback
+Optimized for Supabase PostgreSQL with SQLite fallback.
 
-Switch by setting DATABASE_URL environment variable:
+Set DATABASE_URL environment variable:
   - Not set / "sqlite"  → local SQLite
-  - postgresql://...    → PostgreSQL (Supabase)
-
-On Streamlit Cloud, set DATABASE_URL in st.secrets [database] section.
+  - postgresql://...    → PostgreSQL/Supabase
 """
 
 import os
@@ -18,8 +18,6 @@ import re
 
 # ── Detect environment ────────────────────────────────────────────────────────
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite")
-
-# Dynamic SQLite path — works on Windows, Mac, Linux, and Streamlit Cloud
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SQLITE_PATH = os.path.join(BASE_DIR, "data", "tradeflow.db")
 
@@ -34,22 +32,13 @@ if IS_POSTGRES:
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# SQL TRANSLATION — SQLite syntax → PostgreSQL syntax
-# Applied to every query before it reaches PostgreSQL/Supabase.
-# ════════════════════════════════════════════════════════════════════════════════
+# SQL TRANSLATION — SQLite → PostgreSQL
+# ════════════════════════════════════════════════════════��═══════════════════════
 
 def _translate(sql):
     """
-    Translate SQLite-specific SQL syntax to PostgreSQL.
-    Comprehensive fixes for:
-    1. Placeholders (? → %s)
-    2. Date functions
-    3. Boolean literals (0/1 → FALSE/TRUE) for bare AND qualified columns
-    4. COALESCE boolean/integer mismatches
-    5. Single-quoted column aliases → double-quoted
-    6. String concatenation
-    7. INSERT variants
-    8. Type casts
+    Translate SQLite syntax to PostgreSQL.
+    Handles: placeholders, date functions, booleans, COALESCE, aliases, types, and HAVING clauses.
     """
     s = sql
 
@@ -74,22 +63,17 @@ def _translate(sql):
         ("DATE('now','+7 days')", "(CURRENT_DATE + INTERVAL '7 days')"),
         ("DATE('now')", "CURRENT_DATE"),
     ]
-    for sqlite_pattern, pg_pattern in date_patterns:
-        s = s.replace(sqlite_pattern, pg_pattern)
+    for sqlite_pat, pg_pat in date_patterns:
+        s = s.replace(sqlite_pat, pg_pat)
 
-    # 3. Boolean columns — handle BOTH bare names AND qualified names
+    # 3. Boolean columns — bare AND qualified
     bool_cols = [
         "is_active", "is_hub", "is_outlier", "is_confirmed",
-        "is_shock_flagged", "is_backhaul", "is_perishable",
-        "missing_cost_flag",
+        "is_shock_flagged", "is_backhaul", "is_perishable", "missing_cost_flag",
     ]
-    
-    # Add qualified versions for common table aliases
     qualified_prefixes = ["f.", "r.", "ao.", "c.", "cp.", "s.", "corr.", "co.", "tc.", "t."]
-    qualified_cols = [f"{prefix}{col}" for prefix in qualified_prefixes for col in bool_cols]
-    all_cols = bool_cols + qualified_cols
+    all_cols = bool_cols + [f"{p}{col}" for p in qualified_prefixes for col in bool_cols]
 
-    # Replace boolean literals (0/1 → FALSE/TRUE)
     for col in all_cols:
         s = s.replace(f"{col} = 1", f"{col} = TRUE")
         s = s.replace(f"{col}=1", f"{col} = TRUE")
@@ -97,10 +81,9 @@ def _translate(sql):
         s = s.replace(f"{col}=0", f"{col} = FALSE")
         s = s.replace(f"{col} = '1'", f"{col} = TRUE")
         s = s.replace(f"{col} = '0'", f"{col} = FALSE")
-        # Handle CASE statements
         s = s.replace(f"THEN 1 ELSE 0 END AS {col}", f"THEN TRUE ELSE FALSE END AS {col}")
 
-    # 4. COALESCE with boolean defaults — handle ALL column variations
+    # 4. COALESCE boolean fixes
     for col in all_cols:
         s = s.replace(f"COALESCE({col}, 0)", f"COALESCE({col}, FALSE)")
         s = s.replace(f"COALESCE({col}, 1)", f"COALESCE({col}, TRUE)")
@@ -115,8 +98,7 @@ def _translate(sql):
         "CAST(cp.state_id AS TEXT) || CAST(cp.commodity_id AS TEXT)"
     )
 
-    # 6. Convert single-quoted column aliases to double-quoted identifiers
-    #    Pattern: AS 'Column Name' → AS "Column Name"
+    # 6. Single-quoted column aliases → double-quoted
     s = re.sub(r"\bAS\s+'([^']+)'", r'AS "\1"', s)
 
     # 7. INSERT variants
@@ -129,6 +111,15 @@ def _translate(sql):
     s = s.replace("CAST(is_active AS INTEGER)", "is_active::int")
     s = s.replace("CAST(is_shock_flagged AS INTEGER)", "is_shock_flagged::int")
     s = s.replace("CAST(is_backhaul AS INTEGER)", "is_backhaul::int")
+
+    # 9. PostgreSQL case sensitivity: wrap HAVING column aliases in quotes
+    # Pattern: HAVING ColumnName IS NOT NULL → HAVING "ColumnName" IS NOT NULL
+    s = re.sub(
+        r"HAVING\s+([A-Z]\w+)\s+(IS\s+NOT\s+NULL)",
+        lambda m: f'HAVING "{m.group(1)}" {m.group(2)}',
+        s,
+        flags=re.IGNORECASE
+    )
 
     return s
 
@@ -144,11 +135,10 @@ def get_connection():
             return psycopg2.connect(DATABASE_URL)
         except Exception as e:
             raise ConnectionError(
-                f"Failed to connect to Supabase PostgreSQL. "
+                f"Failed to connect to Supabase. "
                 f"Check DATABASE_URL in secrets. Error: {e}"
             )
     else:
-        # Ensure data directory exists
         os.makedirs(os.path.dirname(SQLITE_PATH), exist_ok=True)
         conn = sqlite3.connect(SQLITE_PATH, timeout=15)
         conn.execute("PRAGMA journal_mode=WAL")
@@ -171,17 +161,19 @@ def get_db():
         conn.close()
 
 
-# ══���═════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 # PUBLIC API
 # ════════════════════════════════════════════════════════════════════════════════
 
 def query(sql, params=()):
-    """Execute a SELECT and return a DataFrame."""
+    """Execute SELECT and return DataFrame."""
     if IS_POSTGRES:
         sql_pg = _translate(sql)
         conn = get_connection()
         try:
             return pd.read_sql(sql_pg, conn, params=params if params else None)
+        except Exception as e:
+            raise Exception(f"PostgreSQL query failed: {e}\nSQL: {sql_pg}")
         finally:
             conn.close()
     else:
@@ -193,7 +185,7 @@ def query(sql, params=()):
 
 
 def execute(sql, params=()):
-    """Execute INSERT / UPDATE / DELETE."""
+    """Execute INSERT/UPDATE/DELETE."""
     if IS_POSTGRES:
         sql_pg = _translate(sql)
         with get_db() as conn:
