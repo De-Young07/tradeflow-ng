@@ -1,65 +1,99 @@
-# src/database.py
+# COMPLETE FILE: src/database.py
+# Replace the entire file with this content
+
 """
 TradeFlow NG — Database Initializer
-For SQLite only. PostgreSQL/Supabase schema is set up independently.
+Handles PostgreSQL/Supabase schema setup and SQLite initialization.
 """
 
-import sqlite3
 import os
+import sqlite3
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite")
 IS_POSTGRES = DATABASE_URL.startswith("postgresql")
+
+if IS_POSTGRES:
+    try:
+        import psycopg2
+    except ImportError:
+        raise ImportError("psycopg2 not installed. Run: pip install psycopg2-binary")
 
 from db_adapter import query, execute, get_connection
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "data", "tradeflow.db")
-SQL_PATH = os.path.join(BASE_DIR, "tradeflow_schema.sql")
+SQLITE_SCHEMA_PATH = os.path.join(BASE_DIR, "tradeflow_schema.sql")
 
 
 def init_database():
-    """Initialize SQLite database. PostgreSQL/Supabase is pre-configured."""
+    """Initialize database schema (SQLite or PostgreSQL)."""
     if IS_POSTGRES:
-        print("✅ Using PostgreSQL/Supabase — schema initialization skipped.")
+        _init_postgres()
+    else:
+        _init_sqlite()
+
+
+def _init_postgres():
+    """Initialize PostgreSQL/Supabase schema."""
+    print("🔍 Detecting PostgreSQL/Supabase schema...")
+
+    try:
+        # Check if tables exist
+        result = query("SELECT COUNT(*) as table_count FROM information_schema.tables WHERE table_schema = 'public'")
+        table_count = result.iloc[0]["table_count"] if not result.empty else 0
+
+        if table_count > 0:
+            print(f"✅ PostgreSQL/Supabase schema already initialized ({table_count} tables found).")
+            return
+
+        print("❌ Schema not found. Please run schema_postgresql.sql manually:")
+        print("   1. Go to Supabase → SQL Editor")
+        print("   2. Copy contents of schema_postgresql.sql")
+        print("   3. Paste and execute")
+        print("   4. Refresh your app")
+
+    except Exception as e:
+        print(f"⚠️  Could not verify schema: {e}")
         print("   Ensure schema_postgresql.sql has been run on your Supabase database.")
-        return
 
-    print(f"Initializing SQLite database at: {DB_PATH}")
 
-    # Create data directory if it doesn't exist
+def _init_sqlite():
+    """Initialize SQLite database."""
+    print(f"Initializing SQLite at: {DB_PATH}")
+
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON")
 
     try:
-        with open(SQL_PATH, "r") as f:
+        with open(SQLITE_SCHEMA_PATH, "r") as f:
             sql_script = f.read()
 
         conn.executescript(sql_script)
         conn.commit()
-        print("✅ SQLite database initialized successfully.")
-        print("   Tables created with seed data.")
+        print("✅ SQLite database initialized with seed data.")
     except Exception as e:
-        print(f"❌ Error initializing database: {e}")
+        print(f"❌ Error initializing SQLite: {e}")
         raise
     finally:
         conn.close()
 
 
 def test_connection():
-    """Verify tables exist and seed data loaded correctly."""
+    """Verify database connection and tables."""
     if IS_POSTGRES:
-        print("✅ PostgreSQL connection test:")
+        print("✅ Testing PostgreSQL/Supabase connection...")
         try:
             result = query("SELECT COUNT(*) as count FROM states")
             count = result.iloc[0]["count"] if not result.empty else 0
-            print(f"   States table: {count} records")
+            print(f"   States table: {count} records ✅")
             return True
         except Exception as e:
-            print(f"❌ PostgreSQL connection failed: {e}")
+            print(f"   ❌ Connection failed: {e}")
             return False
     else:
+        print("✅ Testing SQLite connection...")
         conn = get_connection()
         cursor = conn.cursor()
 
@@ -70,17 +104,18 @@ def test_connection():
             "actual_outcomes", "pipeline_logs"
         ]
 
-        print("\n--- SQLite DATABASE VERIFICATION ---")
+        all_ok = True
         for table in tables:
             try:
                 cursor.execute(f"SELECT COUNT(*) FROM {table}")
                 count = cursor.fetchone()[0]
-                print(f"  {table:<35} → {count} rows")
+                print(f"   {table:<35} → {count} rows ✅")
             except Exception as e:
-                print(f"  {table:<35} → ❌ Error: {e}")
+                print(f"   {table:<35} → ❌ {str(e)[:50]}")
+                all_ok = False
 
         conn.close()
-        print("-----------------------------------\n")
+        return all_ok
 
 
 if __name__ == "__main__":
