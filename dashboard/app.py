@@ -351,16 +351,16 @@ if tab == "📊 Overview":
     )
 
     gap = query("""
-        SELECT c.name AS Commodity,
-               AVG(CASE WHEN s.zone='North' THEN cp.price_per_unit END) AS North,
-               AVG(CASE WHEN s.zone='South' THEN cp.price_per_unit END) AS South
-        FROM cleaned_prices cp
-        JOIN states s ON cp.state_id = s.id
-        JOIN commodities c ON cp.commodity_id = c.id
-        WHERE cp.price_date >= DATE('now','-7 days')
-        GROUP BY c.name
-        HAVING North IS NOT NULL AND South IS NOT NULL
-    """)
+    SELECT c.name AS Commodity,
+           AVG(CASE WHEN s.zone='North' THEN cp.price_per_unit END) AS "North",
+           AVG(CASE WHEN s.zone='South' THEN cp.price_per_unit END) AS "South"
+    FROM cleaned_prices cp
+    JOIN states s ON cp.state_id = s.id
+    JOIN commodities c ON cp.commodity_id = c.id
+    WHERE cp.price_date >= DATE('now','-7 days')
+    GROUP BY c.name
+    HAVING "North" IS NOT NULL AND "South" IS NOT NULL
+""")
 
     if not gap.empty:
         fig3 = go.Figure()
@@ -393,11 +393,11 @@ if tab == "📊 Overview":
     st.info("A log of every time data was cleaned, forecasts generated, or the optimizer ran. ✅ = success. ❌ = check error.")
 
     logs = query("""
-        SELECT run_type AS Pipeline, status AS Status,
-               records_in AS 'Records In', records_out AS 'Records Out',
-               ROUND(duration_secs, 1) AS 'Duration (s)', run_at AS 'Timestamp'
-        FROM pipeline_logs ORDER BY run_at DESC LIMIT 10
-    """)
+    SELECT run_type AS Pipeline, status AS Status,
+           records_in AS "Records In", records_out AS "Records Out",
+           ROUND(duration_secs, 1) AS "Duration (s)", run_at AS "Timestamp"
+    FROM pipeline_logs ORDER BY run_at DESC LIMIT 10
+""")
 
     if not logs.empty:
         logs["Status"] = logs["Status"].apply(
