@@ -13,7 +13,7 @@ import sys, os
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from auth import require_agent_login, agent_logout
-
+from db_adapter import query, execute, get_connection
 LOGO_FULL = os.path.join(os.path.dirname(__file__), 'assets', 'TradeFlow dark.jpg')
 LOGO_ICON = os.path.join(os.path.dirname(__file__), 'assets', 'TradeFlow logo.png')
 
@@ -441,7 +441,7 @@ html, body, [class*="css"] {{
 """, unsafe_allow_html=True)
 
 
-
+from db_adapter import query, execute, get_connection
 # ══════════════════════════════════════════════════════════
 # SESSION STATE
 # ══════════════════════════════════════════════════════════
