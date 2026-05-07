@@ -399,7 +399,7 @@ if tab == "📊 Overview":
     logs = query("""
     SELECT run_type AS Pipeline, status AS Status,
            records_in AS "Records In", records_out AS "Records Out",
-           ROUND(duration_secs, 1) AS "Duration (s)", run_at AS "Timestamp"
+           ROUND(duration_secs::numeric, 1) AS "Duration (s)", run_at AS "Timestamp"
     FROM pipeline_logs ORDER BY run_at DESC LIMIT 10
 """)
 
