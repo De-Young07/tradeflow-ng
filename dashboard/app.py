@@ -351,15 +351,19 @@ if tab == "📊 Overview":
     )
 
     gap = query("""
-    SELECT c.name AS Commodity,
-           AVG(CASE WHEN s.zone='North' THEN cp.price_per_unit END) AS "North",
-           AVG(CASE WHEN s.zone='South' THEN cp.price_per_unit END) AS "South"
-    FROM cleaned_prices cp
-    JOIN states s ON cp.state_id = s.id
-    JOIN commodities c ON cp.commodity_id = c.id
-    WHERE cp.price_date >= DATE('now','-7 days')
-    GROUP BY c.name
-    HAVING "North" IS NOT NULL AND "South" IS NOT NULL
+    SELECT * FROM (
+        SELECT c.name AS Commodity,
+               AVG(CASE WHEN s.zone='North' THEN cp.price_per_unit END) AS "North",
+               AVG(CASE WHEN s.zone='South' THEN cp.price_per_unit END) AS "South"
+        FROM cleaned_prices cp
+        JOIN states s ON cp.state_id = s.id
+        JOIN commodities c ON cp.commodity_id = c.id
+        WHERE cp.price_date >= (CURRENT_DATE - INTERVAL '7 days')
+          AND cp.is_outlier IS NOT TRUE
+        GROUP BY c.name
+    ) sub
+    WHERE "North" IS NOT NULL
+      AND "South" IS NOT NULL
 """)
 
     if not gap.empty:
