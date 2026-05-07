@@ -397,7 +397,7 @@ if tab == "📊 Overview":
     st.info("A log of every time data was cleaned, forecasts generated, or the optimizer ran. ✅ = success. ❌ = check error.")
 
     logs = query("""
-    SELECT run_type AS Pipeline, status AS Status,
+    SELECT run_type AS "Pipeline", status AS "Status",
            records_in AS "Records In", records_out AS "Records Out",
            ROUND(duration_secs::numeric, 1) AS "Duration (s)", run_at AS "Timestamp"
     FROM pipeline_logs ORDER BY run_at DESC LIMIT 10
