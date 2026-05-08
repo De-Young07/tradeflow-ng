@@ -293,7 +293,7 @@ if tab == "📊 Overview":
 
         if not trend.empty:
             fig = px.line(
-                trend, x="Date", y="Price", color="State",
+                trend, x="date", y="Price", color="State",
                 title=f"{sel_comm} — Price per Unit (₦) by State",
                 labels={"Price": "Price (₦/unit)"},
                 color_discrete_sequence=px.colors.qualitative.Safe,
@@ -744,7 +744,7 @@ elif tab == "📈 Forecasts":
 
         if not hist.empty:
             fig.add_trace(go.Scatter(
-                x=hist["Date"], y=hist["Price"],
+                x=hist["date"], y=hist["Price"],
                 mode="lines+markers", name="Historical Price",
                 line=dict(color=GREEN, width=2), marker=dict(size=4),
                 hovertemplate="Date: %{x}<br>Actual: ₦%{y:,.0f}<extra></extra>"
