@@ -386,13 +386,13 @@ def preview_forecasts(commodity_name=None, state_name=None, n=7):
     """
     params = []
     if commodity_name:
-        query  += " AND c.name = ?"
+        query  += " AND c.name = %s"
         params.append(commodity_name)
     if state_name:
-        query  += " AND s.name = ?"
+        query  += " AND s.name = %s"
         params.append(state_name)
 
-    query += " ORDER BY c.name, s.name, f.forecast_date LIMIT ?"
+    query += " ORDER BY c.name, s.name, f.forecast_date LIMIT %s"
     params.append(n * 10)
 
     df = pd.read_sql(query, conn, params=params)
