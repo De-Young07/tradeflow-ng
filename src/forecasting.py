@@ -183,6 +183,7 @@ def write_forecasts(forecast_df, state_id, commodity_id,
     Skips dates already forecasted today (idempotent).
     """
     conn = get_connection()
+    cursor= conn.cursor()
     today = str(date.today())
     inserted = 0
     skipped  = 0
@@ -193,7 +194,7 @@ def write_forecasts(forecast_df, state_id, commodity_id,
         )
 
         try:
-            conn.execute("""
+            cursor.execute("""
                 INSERT OR IGNORE INTO forecasts (
                     state_id, commodity_id,
                     forecast_date, generated_on,
@@ -218,6 +219,7 @@ def write_forecasts(forecast_df, state_id, commodity_id,
             print(f"      Skipped forecast row: {e}")
 
     conn.commit()
+    cursor.close()
     conn.close()
     return inserted, skipped
 
@@ -234,8 +236,8 @@ def log_run(status, records_in, records_out, error=None, duration=None):
         (run_type, status, records_in, records_out, error_message, duration_secs)
         VALUES (?, ?, ?, ?, ?, ?)
     """, ("Forecast", status, records_in, records_out, error, duration))
-    cursor.close()
     conn.commit()
+    cursor.close()
     conn.close()
 
 
