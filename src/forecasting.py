@@ -195,12 +195,14 @@ def write_forecasts(forecast_df, state_id, commodity_id,
 
         try:
             cursor.execute("""
-                INSERT OR IGNORE INTO forecasts (
+                INSERT INTO forecasts (
                     state_id, commodity_id,
                     forecast_date, generated_on,
                     predicted_price, lower_bound, upper_bound,
                     model_version, is_shock_flagged, shock_reason
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (state_id, commodity_id, forecast_date, generated_on)
+                DO NOTHING
             """, (
                 int(state_id),
                 int(commodity_id),
@@ -234,7 +236,7 @@ def log_run(status, records_in, records_out, error=None, duration=None):
     cursor.execute("""
         INSERT INTO pipeline_logs
         (run_type, status, records_in, records_out, error_message, duration_secs)
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (%s,%s,%s,%s,%s,%s)
     """, ("Forecast", status, records_in, records_out, error, duration))
     conn.commit()
     cursor.close()
