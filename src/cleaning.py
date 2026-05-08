@@ -227,12 +227,13 @@ def write_cleaned_prices(df):
         return 0
 
     conn = get_connection()
+    cursor= conn.cursor()
     inserted = 0
     skipped  = 0
 
     for _, row in df.iterrows():
         try:
-            conn.execute("""
+            cursor.execute("""
                 INSERT OR IGNORE INTO cleaned_prices (
                     raw_submission_id,
                     state_id,
@@ -246,7 +247,7 @@ def write_cleaned_prices(df):
                     outlier_reason,
                     is_confirmed,
                     cleaning_notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """, (
                 None if row.get("source_channel") == "Dummy" else (int(row["raw_id"]) if pd.notna(row.get("raw_id")) else None),
                 int(row["state_id"]),
@@ -267,6 +268,7 @@ def write_cleaned_prices(df):
             print(f"    Skipped row: {e}")
 
     conn.commit()
+    cursor.close()
     conn.close()
     print(f"  Written: {inserted} inserted, {skipped} skipped.")
     return inserted
@@ -279,12 +281,14 @@ def write_cleaned_prices(df):
 def log_pipeline_run(run_type, status, records_in, records_out,
                      error_message=None, duration_secs=None):
     conn = get_connection()
-    conn.execute("""
+    cursor= conn.cursor()
+    cursor.execute("""
         INSERT INTO pipeline_logs
         (run_type, status, records_in, records_out, error_message, duration_secs)
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (%s,%s,%s,%s,%s,%s)
     """, (run_type, status, records_in, records_out, error_message, duration_secs))
     conn.commit()
+    cursor.close()
     conn.close()
 
 
