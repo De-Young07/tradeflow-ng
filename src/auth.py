@@ -187,7 +187,7 @@ def require_agent_login():
                     a = agent.iloc[0]
 
                     state_row = _query(
-                        "SELECT id, name FROM states WHERE id = ?",
+                        "SELECT id, name FROM states WHERE id = %s",
                         (int(a["state_id"]),),
                     )
 
