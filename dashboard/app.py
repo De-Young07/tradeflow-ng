@@ -919,24 +919,27 @@ elif tab == "📝 Feedback":
             if st.form_submit_button("✅ Submit Outcome", type="primary"):
                 actual_profit = actual_qty * (actual_sell - actual_buy - actual_transport)
                 conn = get_connection()
-                conn.execute("""
+                cursor= conn.cursor()
+                cursor.execute("""
                     INSERT INTO actual_outcomes (
                         recommendation_id, commodity_id, corridor_id,
                         actual_buy_price, actual_sell_price,
                         actual_transport_cost, actual_quantity,
                         actual_profit_ngn, trip_date, outcome_notes, data_source
                     )
-                    SELECT ?, r.commodity_id, r.corridor_id,
-                           ?, ?, ?, ?, ?, ?, ?, 'Dashboard'
-                    FROM optimization_recommendations r WHERE r.id = ?
+                    SELECT %s, r.commodity_id, r.corridor_id,
+                           %s,%s,%s,%s,%s,%s,%s, 'Dashboard'
+                    FROM optimization_recommendations r WHERE r.id = %s
                 """, (int(sel["id"]), actual_buy, actual_sell, actual_transport,
                       actual_qty, round(actual_profit, 2), str(trip_date),
                       notes, int(sel["id"])))
-                conn.execute(
-                    "UPDATE optimization_recommendations SET status='Completed' WHERE id=?",
+                cursor.execute(
+                    "UPDATE optimization_recommendations SET status='Completed' WHERE id=%s",
                     (int(sel["id"]),)
                 )
                 conn.commit()
+                cursor.close()
+                conn.close()
                 st.success(f"✅ Outcome saved! Actual profit: **{naira(actual_profit)}**")
                 st.balloons()
 
