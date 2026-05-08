@@ -256,6 +256,7 @@ def run_forecasting_pipeline(periods=7, model_version="prophet_v1.0"):
 
     # Load all active state + commodity combinations
     conn = get_connection()
+    cursor= conn.cursor()
     combos = pd.read_sql("""
         SELECT DISTINCT
             cp.state_id,
@@ -268,7 +269,8 @@ def run_forecasting_pipeline(periods=7, model_version="prophet_v1.0"):
         WHERE cp.is_outlier IS NOT TRUE
           AND cp.is_confirmed IS TRUE
         ORDER BY c.name, s.name
-    """, conn)
+    """, cursor)
+    cursor.close()
     conn.close()
 
     total_combos   = len(combos)
