@@ -51,8 +51,8 @@ def load_training_data(state_id, commodity_id, min_rows=8):
             price_date      AS ds,
             price_per_unit  AS y
         FROM cleaned_prices
-        WHERE state_id     = ?
-          AND commodity_id = ?
+        WHERE state_id     = %s
+          AND commodity_id = %s
           AND is_outlier   = 0
           AND is_confirmed = 1
         ORDER BY price_date ASC
@@ -228,11 +228,13 @@ def write_forecasts(forecast_df, state_id, commodity_id,
 
 def log_run(status, records_in, records_out, error=None, duration=None):
     conn = get_connection()
-    conn.execute("""
+    cursor= conn.cursor()
+    cursor.execute("""
         INSERT INTO pipeline_logs
         (run_type, status, records_in, records_out, error_message, duration_secs)
         VALUES (?, ?, ?, ?, ?, ?)
     """, ("Forecast", status, records_in, records_out, error, duration))
+    cursor.close()
     conn.commit()
     conn.close()
 
@@ -256,7 +258,6 @@ def run_forecasting_pipeline(periods=7, model_version="prophet_v1.0"):
 
     # Load all active state + commodity combinations
     conn = get_connection()
-    cursor= conn.cursor()
     combos = pd.read_sql("""
         SELECT DISTINCT
             cp.state_id,
@@ -269,8 +270,7 @@ def run_forecasting_pipeline(periods=7, model_version="prophet_v1.0"):
         WHERE cp.is_outlier IS NOT TRUE
           AND cp.is_confirmed IS TRUE
         ORDER BY c.name, s.name
-    """, cursor)
-    cursor.close()
+    """, conn)
     conn.close()
 
     total_combos   = len(combos)
