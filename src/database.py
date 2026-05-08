@@ -113,7 +113,7 @@ def test_connection():
             except Exception as e:
                 print(f"   {table:<35} → ❌ {str(e)[:50]}")
                 all_ok = False
-
+        cursor.close()
         conn.close()
         return all_ok
 
