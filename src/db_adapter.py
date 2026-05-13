@@ -1,6 +1,3 @@
-# COMPLETE FILE: src/db_adapter.py
-# Replace the entire file with this content
-
 """
 TradeFlow NG — Database Adapter
 Optimized for Supabase PostgreSQL with SQLite fallback.
@@ -33,7 +30,7 @@ if IS_POSTGRES:
 
 # ════════════════════════════════════════════════════════════════════════════════
 # SQL TRANSLATION — SQLite → PostgreSQL
-# ════════════════════════════════════════════════════════��═══════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 def _translate(sql):
     """
@@ -66,7 +63,7 @@ def _translate(sql):
     for sqlite_pat, pg_pat in date_patterns:
         s = s.replace(sqlite_pat, pg_pat)
 
-    # 3. Boolean columns — bare AND qualified
+    # 3. Boolean columns — bare AND qualified (must convert 0/1 to FALSE/TRUE)
     bool_cols = [
         "is_active", "is_hub", "is_outlier", "is_confirmed",
         "is_shock_flagged", "is_backhaul", "is_perishable", "missing_cost_flag",
@@ -75,6 +72,7 @@ def _translate(sql):
     all_cols = bool_cols + [f"{p}{col}" for p in qualified_prefixes for col in bool_cols]
 
     for col in all_cols:
+        # Replace = 1 with = TRUE and = 0 with = FALSE
         s = s.replace(f"{col} = 1", f"{col} = TRUE")
         s = s.replace(f"{col}=1", f"{col} = TRUE")
         s = s.replace(f"{col} = 0", f"{col} = FALSE")
@@ -113,7 +111,6 @@ def _translate(sql):
     s = s.replace("CAST(is_backhaul AS INTEGER)", "is_backhaul::int")
 
     # 9. PostgreSQL case sensitivity: wrap HAVING column aliases in quotes
-    # Pattern: HAVING ColumnName IS NOT NULL → HAVING "ColumnName" IS NOT NULL
     s = re.sub(
         r"HAVING\s+([A-Z]\w+)\s+(IS\s+NOT\s+NULL)",
         lambda m: f'HAVING "{m.group(1)}" {m.group(2)}',
@@ -166,12 +163,15 @@ def get_db():
 # ════════════════════════════════════════════════════════════════════════════════
 
 def query(sql, params=()):
-    """Execute SELECT and return DataFrame."""
+    """Execute SELECT and return DataFrame (lowercase column names)."""
     if IS_POSTGRES:
         sql_pg = _translate(sql)
         conn = get_connection()
         try:
-            return pd.read_sql(sql_pg, conn, params=params if params else None)
+            df = pd.read_sql(sql_pg, conn, params=params if params else None)
+            # PostgreSQL returns lowercase column names; normalize for consistency
+            df.columns = df.columns.str.lower()
+            return df
         except Exception as e:
             raise Exception(f"PostgreSQL query failed: {e}\nSQL: {sql_pg}")
         finally:
@@ -179,13 +179,16 @@ def query(sql, params=()):
     else:
         conn = get_connection()
         try:
-            return pd.read_sql(sql, conn, params=params)
+            df = pd.read_sql(sql, conn, params=params)
+            # Normalize column names to lowercase
+            df.columns = df.columns.str.lower()
+            return df
         finally:
             conn.close()
 
 
 def execute(sql, params=()):
-    """Execute INSERT/UPDATE/DELETE."""
+    """Execute INSERT/UPDATE/DELETE with proper connection handling."""
     if IS_POSTGRES:
         sql_pg = _translate(sql)
         with get_db() as conn:
@@ -197,7 +200,7 @@ def execute(sql, params=()):
 
 
 def executemany(sql, params_list):
-    """Batch INSERT."""
+    """Batch INSERT with proper connection handling."""
     if IS_POSTGRES:
         sql_pg = _translate(sql)
         with get_db() as conn:
