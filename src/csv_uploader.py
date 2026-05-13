@@ -8,24 +8,19 @@ Expected CSV columns:
     state, market, commodity, price, unit, quantity, date, agent_phone
 """
 
-import sqlite3
 import pandas as pd
 import numpy as np
 import os
 from datetime import datetime
+from dotenv import load_dotenv
 
-import os
+load_dotenv()
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite")
 IS_POSTGRES  = DATABASE_URL.startswith("postgresql")
 
 # Use db_adapter instead of direct sqlite3 calls
 from db_adapter import query, execute, executemany, get_connection
-
-# ── Path config ────────────────────────────────────────────
-DB_PATH      = r"C:\Users\USER\Projects\TradeFlow\data\tradeflow.db"
-UPLOAD_DIR   = r"C:\Users\USER\Projects\TradeFlow\data\raw"
-
 
 
 # ══════════════════════════════════════════════════════════
@@ -64,7 +59,8 @@ def generate_template(output_path=None):
     Share this with agents via WhatsApp or email.
     """
     if output_path is None:
-        output_path = os.path.join(UPLOAD_DIR, "agent_report_template.csv")
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        output_path = os.path.join(base_dir, "data", "agent_report_template.csv")
 
     template_data = {
         "state":       ["Oyo", "Lagos"],
@@ -209,12 +205,12 @@ def ingest_csv(filepath):
 
     for _, row in df.iterrows():
         try:
-            conn.execute("""
+            execute("""
                 INSERT INTO raw_submissions (
                     agent_id, state_id, market_id, commodity_id,
                     reported_price, reported_unit,
                     quantity_available, submission_date, source_channel
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 int(row["agent_id"])   if pd.notna(row.get("agent_id"))   else None,
                 int(row["state_id"]),
@@ -230,9 +226,6 @@ def ingest_csv(filepath):
         except Exception as e:
             skipped += 1
             print(f"    Skipped row: {e}")
-
-    conn.commit()
-    conn.close()
 
     print(f"\n  ✓ Done: {inserted} inserted, {skipped} skipped.")
     print(f"{'='*50}\n")

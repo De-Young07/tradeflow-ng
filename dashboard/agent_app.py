@@ -5,15 +5,20 @@ Animations, tap feedback, and clear actionable trade cards.
 """
 
 import streamlit as st
-import sqlite3
 import pandas as pd
 from datetime import date, datetime
 import sys, os
 
-import sys, os
+# Load DATABASE_URL from Streamlit secrets into environment
+try:
+    os.environ["DATABASE_URL"] = st.secrets["database"]["DATABASE_URL"]
+except (KeyError, FileNotFoundError):
+    pass
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from auth import require_agent_login, agent_logout
-from db_adapter import query, execute, get_connection
+from db_adapter import query, execute, get_connection, backend_name
+
 LOGO_FULL = os.path.join(os.path.dirname(__file__), 'assets', 'TradeFlow dark.jpg')
 LOGO_ICON = os.path.join(os.path.dirname(__file__), 'assets', 'TradeFlow logo.png')
 
@@ -22,8 +27,6 @@ st.set_page_config(
     page_icon=LOGO_ICON,
     layout="centered",
 )
-
-DB_PATH = r"C:\Users\USER\Projects\TradeFlow\data\tradeflow.db"
 
 GREEN  = "#1A6B3C"
 LIME   = "#2ECC71"
@@ -36,16 +39,6 @@ LIGHT  = "#E8F8F0"
 # ══════════════════════════════════════════════════════════
 # HELPERS
 # ══════════════════════════════════════════════════════════
-
-@st.cache_resource
-def get_connection():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def query(sql, params=()):
-    return pd.read_sql(sql, get_connection(), params=params)
 
 def naira(v):
     try: return f"₦{float(v):,.0f}"
@@ -440,8 +433,6 @@ html, body, [class*="css"] {{
 </style>
 """, unsafe_allow_html=True)
 
-
-from db_adapter import query, execute, get_connection
 # ══════════════════════════════════════════════════════════
 # SESSION STATE
 # ══════════════════════════════════════════════════════════
@@ -451,7 +442,7 @@ for key, default in [
     ("agent_name", None),
     ("agent_state", None),
     ("agent_state_id", None),
-    ("agent_authenticated", False),  # ← add this if missing
+    ("agent_authenticated", False),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -460,12 +451,10 @@ for key, default in [
 # LOGIN
 # ══════════════════════════════════════════════════════════
 
-
 authenticated, agent_data = require_agent_login()
 if not authenticated:
     st.stop()
 
-# Then use agent_data instead of st.session_state directly:
 agent_id    = agent_data["agent_id"]
 agent_name  = agent_data["agent_name"]
 agent_state = agent_data["agent_state"]
@@ -530,7 +519,7 @@ if page == "📋 My Trades":
         LEFT JOIN states s_dest  ON corr.dest_state_id=s_dest.id
         WHERE r.run_id=(SELECT MAX(id) FROM optimization_runs)
           AND r.status='Pending'
-          AND (corr.origin_state_id=? OR corr.dest_state_id=?)
+          AND (corr.origin_state_id=%s OR corr.dest_state_id=%s)
         ORDER BY r.expected_profit_ngn DESC
     """, (sid, sid)) if sid else pd.DataFrame()
 
@@ -617,12 +606,12 @@ if page == "📋 My Trades":
             comm_str      = str(row['commodity'])
             delay         = i * 0.08
 
-            # Build complete HTML as a single string — no nested f-strings
+            # Build complete HTML
             card_html = (
                 '<div class="trade-card ' + card_cls + '" style="animation-delay:' + str(delay) + 's;">'
                 + tags_html
                 + '<div class="trade-commodity">' + comm_str + '</div>'
-                + '<div class="trade-route">'
+                + '<div class="trade-route>'
                 + origin_str + ' &rarr; ' + dest_str
                 + (' <span style="font-size:0.78rem;color:#aaa;">' + route_detail + '</span>' if route_detail else '')
                 + '</div>'
@@ -651,10 +640,10 @@ if page == "📋 My Trades":
     local = query("""
         SELECT c.name AS Commodity,
                cp.price_per_unit AS Price,
-               cp.price_date AS 'Last Updated'
+               cp.price_date AS "Last Updated"
         FROM cleaned_prices cp
         JOIN commodities c ON cp.commodity_id=c.id
-        WHERE cp.state_id=?
+        WHERE cp.state_id=%s
           AND cp.price_date=(
               SELECT MAX(p2.price_date) FROM cleaned_prices p2
               WHERE p2.state_id=cp.state_id
@@ -668,8 +657,8 @@ if page == "📋 My Trades":
         st.dataframe(local, width='stretch', hide_index=True)
     else:
         st.markdown(
-            '<div class="no-trades" style="padding:24px;">'
-            'No price data recorded for your area yet.'
+            '<div class="no-trades" style="padding:24px;">' 
+            'No price data recorded for your area yet.' 
             '</div>',
             unsafe_allow_html=True
         )
@@ -697,7 +686,7 @@ elif page == "✅ Report":
         LEFT JOIN states s_dest  ON corr.dest_state_id=s_dest.id
         WHERE r.run_id=(SELECT MAX(id) FROM optimization_runs)
           AND r.status='Pending'
-          AND (corr.origin_state_id=? OR corr.dest_state_id=?)
+          AND (corr.origin_state_id=%s OR corr.dest_state_id=%s)
         ORDER BY r.id DESC
     """, (sid, sid)) if sid else pd.DataFrame()
 
@@ -805,9 +794,9 @@ elif page == "✅ Report":
                     actual_profit_ngn, trip_date,
                     outcome_notes, data_source, agent_id
                 )
-                SELECT ?, r.commodity_id, r.corridor_id,
-                       ?, ?, ?, ?, ?, DATE('now'), ?, 'Agent App', ?
-                FROM optimization_recommendations r WHERE r.id=?
+                SELECT %s, r.commodity_id, r.corridor_id,
+                       %s, %s, %s, %s, %s, CURRENT_DATE, %s, 'Agent App', %s
+                FROM optimization_recommendations r WHERE r.id=%s
             """, (
                 int(sel["id"]), actual_buy, actual_sell,
                 actual_transport, actual_qty,
@@ -816,7 +805,7 @@ elif page == "✅ Report":
             ))
             conn.execute(
                 "UPDATE optimization_recommendations "
-                "SET status='Completed' WHERE id=?",
+                "SET status='Completed' WHERE id=%s",
                 (int(sel["id"]),)
             )
             conn.commit()
@@ -850,7 +839,7 @@ elif page == "💬 Price":
     comms = query("SELECT id, name FROM commodities ORDER BY name")
     mkts  = query("""
         SELECT m.id, m.name FROM markets m
-        WHERE m.state_id=? AND m.is_active=1
+        WHERE m.state_id=%s AND m.is_active=1
     """, (sid,)) if sid else pd.DataFrame()
 
     with st.form("price_form"):
@@ -890,7 +879,7 @@ elif page == "💬 Price":
                         agent_id, state_id, market_id, commodity_id,
                         reported_price, quantity_available,
                         submission_date, source_channel
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'Agent App')
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'Agent App')
                 """, (
                     agent_id, sid, mkt_id, comm_id,
                     float(price),
@@ -927,7 +916,7 @@ elif page == "💬 Price":
         FROM raw_submissions rs
         JOIN commodities c ON rs.commodity_id=c.id
         LEFT JOIN markets m ON rs.market_id=m.id
-        WHERE rs.agent_id=?
+        WHERE rs.agent_id=%s
         ORDER BY rs.submission_date DESC LIMIT 10
     """, (agent_id,))
 

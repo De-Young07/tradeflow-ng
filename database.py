@@ -1,34 +1,50 @@
-# Run in Anaconda Prompt or terminal
-# pip install psycopg2-binary sqlalchemy first
+# TradeFlow NG — Supabase Database Migration Script (Archived)
+# Now using db_adapter.py for unified database access via environment variable.
+# Reference: This shows the correct Supabase pooler connection string format.
 
-import sqlite3
-import pandas as pd
-from sqlalchemy import create_engine, text
+import os
+from dotenv import load_dotenv
 
-SQLITE_PATH  = r"C:\Users\USER\Projects\TradeFlow\data\tradeflow.db"
-DATABASE_URL = "postgresql://postgres:Adebc4real.com@db.lheuohaztwtpouhhulyl.supabase.co:5432/postgres"
+load_dotenv()
 
-sqlite_conn = sqlite3.connect(SQLITE_PATH)
-pg_engine   = create_engine(DATABASE_URL)
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://postgres.lheuohaztwtpouhhulyl:YOUR_PASSWORD@aws-0-eu-west-1.pooler.supabase.com:6543/postgres"
+)
 
-# Tables to migrate (in dependency order)
-tables = [
-    "states", "markets", "commodities", "vehicle_types",
-    "corridors", "agents", "raw_submissions", "cleaned_prices",
-    "transport_costs", "forecasts", "optimization_runs",
-    "optimization_recommendations", "actual_outcomes", "pipeline_logs"
-]
+# ⚠️ IMPORTANT: Use pooler connection (port 6543) for Streamlit Cloud and restricted networks
+# Direct connection (port 5432) will NOT work in those environments
 
-for table in tables:
-    try:
-        df = pd.read_sql(f"SELECT * FROM {table}", sqlite_conn)
-        if df.empty:
-            print(f"  {table}: empty — skipping")
-            continue
-        df.to_sql(table, pg_engine, if_exists="append", index=False)
-        print(f"  {table}: {len(df)} rows migrated ✓")
-    except Exception as e:
-        print(f"  {table}: FAILED — {e}")
+if "6543" not in DATABASE_URL:
+    print("⚠️  WARNING: Not using pooler connection (port 6543)")
+    print("   Recommended: Use pooler for cloud deployment")
 
-sqlite_conn.close()
-print("\nMigration complete.")
+print("""\n═══════════════════════════════════════════════════════════════
+TradeFlow NG — Supabase Setup Guide
+═══════════════════════════════════════════════════════════════
+
+1. SET DATABASE_URL in environment
+   
+   Option A: Local development (.env file)
+   ────────────────────────────────────────
+   DATABASE_URL=postgresql://postgres.lheuohaztwtpouhhulyl:YOUR_PASSWORD@aws-0-eu-west-1.pooler.supabase.com:6543/postgres
+   
+   Option B: Streamlit Cloud (secrets.toml)
+   ────────────────────────────────────────
+   [database]
+   DATABASE_URL = "postgresql://postgres.lheuohaztwtpouhhulyl:YOUR_PASSWORD@aws-0-eu-west-1.pooler.supabase.com:6543/postgres"
+   
+   Option C: Environment variable
+   ──────────────────────────────────
+   export DATABASE_URL="postgresql://postgres.lheuohaztwtpouhhulyl:YOUR_PASSWORD@aws-0-eu-west-1.pooler.supabase.com:6543/postgres"
+
+2. All database operations now use db_adapter.py
+   No hardcoded connection strings!
+   
+3. Connection flow:
+   └─ os.environ.get(DATABASE_URL)
+   └─ db_adapter.py detects Supabase (postgresql://)
+   └─ Routes to psycopg2 with pooler connection
+   
+═══════════════════════════════════════════════════════════════
+""")
