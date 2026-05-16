@@ -546,22 +546,13 @@ def suggest_backhaul(recommendations):
 # 7. SAVE TO DATABASE
 # ══════════════════════════════════════════════════════════
 
-def save_optimization_run(total_profit, status, week_start, week_end):
-    """Create an optimization_runs record and return its ID."""
-    conn = get_connection()
-    cursor = conn.execute("""
-        INSERT INTO optimization_runs
-        (run_date, week_start, week_end, model_version,
-         solver_status, total_profit_ngn)
-        VALUES (DATE('now'), ?, ?, ?, ?, ?)
-    """, (
-        str(week_start), str(week_end),
-        "pulp_v1.0", status, round(total_profit, 2)
-    ))
-    run_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return run_id
+from db_adapter import execute as db_execute
+
+db_execute("""
+    INSERT INTO optimization_runs
+    (run_date, week_start, week_end, solver_status, total_profit_ngn)
+    VALUES (%s, %s, %s, %s, %s)
+""", (run_date, week_start, week_end, solver_status, total_profit))
 
 
 def save_recommendations(recommendations, run_id):
