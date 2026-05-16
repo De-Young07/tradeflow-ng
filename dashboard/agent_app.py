@@ -639,7 +639,7 @@ if page == "📋 My Trades":
     )
     local = query("""
         SELECT c.name AS Commodity,
-               cp.price_per_unit AS Price,
+               cp.price_per_unit AS price,
                cp.price_date AS "Last Updated"
         FROM cleaned_prices cp
         JOIN commodities c ON cp.commodity_id=c.id
@@ -653,7 +653,7 @@ if page == "📋 My Trades":
     """, (sid,)) if sid else pd.DataFrame()
 
     if not local.empty:
-        local["Price"] = local["Price"].apply(naira)
+        local["price"] = local["price"].apply(naira)
         st.dataframe(local, width='stretch', hide_index=True)
     else:
         st.markdown(
