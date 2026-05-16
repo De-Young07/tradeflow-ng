@@ -39,26 +39,20 @@ DB_PATH = r"C:\Users\USER\Projects\TradeFlow\data\tradeflow.db"
 # 1. LOAD TRAINING DATA
 # ══════════════════════════════════════════════════════════
 
-def load_training_data(state_id, commodity_id, min_rows=8):
-    """
-    Load cleaned price history for a specific state + commodity.
-    Prophet needs at minimum ~8 data points to fit reliably.
-    Returns None if insufficient data.
-    """
-    conn = get_connection()
-    df = pd.read_sql("""
-        SELECT
-            price_date      AS ds,
-            price_per_unit  AS y
+from db_adapter import query as db_query
+
+def load_training_data(state_id, commodity_id):
+    df = db_query("""
+        SELECT price_date AS ds, price_per_unit AS y
         FROM cleaned_prices
-        WHERE state_id     = %s
-          AND commodity_id = %s
+        WHERE state_id     = ?
+          AND commodity_id = ?
           AND is_outlier   = 0
           AND is_confirmed = 1
-        ORDER BY price_date ASC
-    """, conn, params=(state_id, commodity_id))
-    conn.close()
-
+          AND price_date IS NOT NULL
+        ORDER BY price_date
+    """, (state_id, commodity_id))
+    
     if len(df) < min_rows:
         return None
 
@@ -230,17 +224,13 @@ def write_forecasts(forecast_df, state_id, commodity_id,
 # 6. PIPELINE LOG
 # ══════════════════════════════════════════════════════════
 
-def log_run(status, records_in, records_out, error=None, duration=None):
-    conn = get_connection()
-    cursor= conn.cursor()
-    cursor.execute("""
+def log_run(status, records_in=0, records_out=0, error=None, duration=None):
+    from db_adapter import execute
+    execute("""
         INSERT INTO pipeline_logs
         (run_type, status, records_in, records_out, error_message, duration_secs)
-        VALUES (%s,%s,%s,%s,%s,%s)
-    """, ("Forecast", status, records_in, records_out, error, duration))
-    conn.commit()
-    cursor.close()
-    conn.close()
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """, ("Forecasting", status, records_in, records_out, error, duration))
 
 
 # ══════════════════════════════════════════════════════════
