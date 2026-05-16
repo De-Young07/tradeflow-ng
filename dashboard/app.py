@@ -282,8 +282,8 @@ if tab == "📊 Overview":
         sel_comm  = st.selectbox("Select commodity", comm_opts, key="ov_comm")
 
         trend = query("""
-            SELECT cp.price_date AS Date, s.name AS State,
-                   cp.price_per_unit AS Price
+            SELECT cp.price_date AS date, s.name AS state,
+                   cp.price_per_unit AS price
             FROM cleaned_prices cp
             JOIN states s ON cp.state_id = s.id
             JOIN commodities c ON cp.commodity_id = c.id
@@ -293,7 +293,7 @@ if tab == "📊 Overview":
 
         if not trend.empty:
             fig = px.line(
-                trend, x="date", y="Price", color="State",
+                trend, x="date", y="price", color="state",
                 title=f"{sel_comm} — Price per Unit (₦) by State",
                 labels={"Price": "Price (₦/unit)"},
                 color_discrete_sequence=px.colors.qualitative.Safe,
@@ -724,7 +724,7 @@ elif tab == "📈 Forecasts":
     """, (sel_state, sel_comm))
 
     hist = query("""
-        SELECT cp.price_date AS Date, cp.price_per_unit AS Price
+        SELECT cp.price_date AS date, cp.price_per_unit AS price
         FROM cleaned_prices cp
         JOIN states s      ON cp.state_id     = s.id
         JOIN commodities c ON cp.commodity_id = c.id
@@ -744,7 +744,7 @@ elif tab == "📈 Forecasts":
 
         if not hist.empty:
             fig.add_trace(go.Scatter(
-                x=hist["date"], y=hist["Price"],
+                x=hist["date"], y=hist["price"],
                 mode="lines+markers", name="Historical Price",
                 line=dict(color=GREEN, width=2), marker=dict(size=4),
                 hovertemplate="Date: %{x}<br>Actual: ₦%{y:,.0f}<extra></extra>"
