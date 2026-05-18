@@ -1,59 +1,50 @@
 """
 TradeFlow NG — Prophet Forecasting Module
-Trains Prophet models on cleaned price data and generates
-7-day ahead forecasts per commodity per state.
-
-Shock detection: High-uncertainty forecasts are included
-but marked as high-risk for the optimization layer.
+Generates 7-day price forecasts per commodity per state.
+All DB access goes through db_adapter (handles SQLite ↔ PostgreSQL).
 """
 
-import sqlite3
 import pandas as pd
 import numpy as np
 from datetime import datetime, date, timedelta
 import warnings
 warnings.filterwarnings("ignore")
-
 import os
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite")
-IS_POSTGRES  = DATABASE_URL.startswith("postgresql")
+from db_adapter import query as db_query, execute as db_execute, get_connection
 
-# Use db_adapter instead of direct sqlite3 calls
-from db_adapter import query, execute, executemany, get_connection
-
-# ── Prophet import with helpful error ─────────────────────
 try:
     from prophet import Prophet
 except ImportError:
-    raise ImportError(
-        "Prophet not installed. Run: pip install prophet"
-    )
+    raise ImportError("Prophet not installed. Run: pip install prophet")
 
-# ── Path config ────────────────────────────────────────────
-DB_PATH = r"C:\Users\USER\Projects\TradeFlow\data\tradeflow.db"
+# Minimum data points required to train Prophet
+MIN_ROWS = 10
 
 
-
-# ══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
 # 1. LOAD TRAINING DATA
-# ══════════════════════════════════════════════════════════
-
-from db_adapter import query as db_query
+# ═══════════════════════════════════════════════════════════
 
 def load_training_data(state_id, commodity_id):
+    """
+    Load cleaned, confirmed prices for one state+commodity.
+    Routes through db_adapter so is_outlier/is_confirmed
+    booleans are translated correctly for PostgreSQL.
+    """
     df = db_query("""
-        SELECT price_date AS ds, price_per_unit AS y
-        FROM cleaned_prices
-        WHERE state_id     = ?
-          AND commodity_id = ?
-          AND is_outlier   = 0
-          AND is_confirmed = 1
-          AND price_date IS NOT NULL
+        SELECT price_date     AS ds,
+               price_per_unit AS y
+        FROM   cleaned_prices
+        WHERE  state_id     = ?
+          AND  commodity_id = ?
+          AND  is_outlier   = 0
+          AND  is_confirmed = 1
+          AND  price_date   IS NOT NULL
         ORDER BY price_date
     """, (state_id, commodity_id))
-    
-    if len(df) < min_rows:
+
+    if len(df) < MIN_ROWS:
         return None
 
     df["ds"] = pd.to_datetime(df["ds"])
@@ -62,102 +53,67 @@ def load_training_data(state_id, commodity_id):
     return df
 
 
-# ══════════════════════════════════════════════════════════
-# 2. TRAIN PROPHET MODEL
-# ══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+# 2. TRAIN PROPHET
+# ═══════════════════════════════════════════════════════════
 
 def train_prophet(df, commodity_name=""):
-    """
-    Train a Prophet model on price history.
-    Configuration is tuned for Nigerian commodity markets:
-    - Weekly seasonality on (markets are weekly)
-    - Daily seasonality off (we have weekly data)
-    - Yearly seasonality on (harvest cycles matter)
-    - Higher changepoint flexibility for volatile markets
-    """
     model = Prophet(
         yearly_seasonality=True,
         weekly_seasonality=True,
         daily_seasonality=False,
-        changepoint_prior_scale=0.3,      # Higher = more flexible trend
-        seasonality_prior_scale=10.0,     # Allow strong seasonality
-        interval_width=0.80,              # 80% confidence interval
+        changepoint_prior_scale=0.3,
+        seasonality_prior_scale=10.0,
+        interval_width=0.80,
         uncertainty_samples=500,
     )
-
-    # Nigerian public holidays affect market activity
     model.add_country_holidays(country_name="NG")
-
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         model.fit(df)
-
     return model
 
 
-# ══════════════════════════════════════════════════════════
-# 3. GENERATE FORECASTS
-# ══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+# 3. GENERATE FORECAST
+# ═══════════════════════════════════════════════════════════
 
 def generate_forecast(model, periods=7):
-    """
-    Generate forecast for the next `periods` days.
-    Returns a DataFrame with ds, yhat, yhat_lower, yhat_upper.
-    Only returns future dates (not historical fitted values).
-    """
-    future = model.make_future_dataframe(periods=periods, freq="D")
+    future   = model.make_future_dataframe(periods=periods, freq="D")
     forecast = model.predict(future)
-
-    # Keep only the future portion
-    today = pd.Timestamp(date.today()) - pd.Timedelta(days=1)
+    today    = pd.Timestamp(date.today()) - pd.Timedelta(days=1)
     forecast = forecast[forecast["ds"] > today].copy()
-
-    # Keep only what we need
     forecast = forecast[["ds", "yhat", "yhat_lower", "yhat_upper"]].copy()
-
-    # Clip negative predictions (prices can't be negative)
     forecast["yhat"]       = forecast["yhat"].clip(lower=0)
     forecast["yhat_lower"] = forecast["yhat_lower"].clip(lower=0)
     forecast["yhat_upper"] = forecast["yhat_upper"].clip(lower=0)
-
     return forecast
 
 
-# ══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
 # 4. SHOCK DETECTION
-# ══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
 
 def detect_shock(forecast_row, historical_mean, historical_std,
                  uncertainty_threshold=0.3, zscore_threshold=2.5):
-    """
-    Flag a forecast as high-risk if:
-    1. Uncertainty band is too wide relative to the predicted price
-       (uncertainty_ratio > threshold), OR
-    2. Predicted price is far from historical norm (z-score > threshold)
+    predicted  = forecast_row["yhat"]
+    lower      = forecast_row["yhat_lower"]
+    upper      = forecast_row["yhat_upper"]
+    band_width = upper - lower
+    reasons    = []
 
-    Returns (is_shock_flagged, shock_reason)
-    """
-    predicted    = forecast_row["yhat"]
-    lower        = forecast_row["yhat_lower"]
-    upper        = forecast_row["yhat_upper"]
-    band_width   = upper - lower
-
-    reasons = []
-
-    # Check 1: Uncertainty ratio
     if predicted > 0:
-        uncertainty_ratio = band_width / predicted
-        if uncertainty_ratio > uncertainty_threshold:
+        ratio = band_width / predicted
+        if ratio > uncertainty_threshold:
             reasons.append(
-                f"Wide uncertainty band: {round(uncertainty_ratio*100, 1)}% of predicted price"
+                f"Wide uncertainty band: {round(ratio*100,1)}% of predicted price"
             )
 
-    # Check 2: Z-score vs historical
     if historical_std and historical_std > 0:
         z = abs(predicted - historical_mean) / historical_std
         if z > zscore_threshold:
             reasons.append(
-                f"Z-score={round(z, 2)} vs historical mean={round(historical_mean, 0)}"
+                f"Z-score={round(z,2)} vs historical mean={round(historical_mean,0)}"
             )
 
     is_flagged   = len(reasons) > 0
@@ -165,38 +121,32 @@ def detect_shock(forecast_row, historical_mean, historical_std,
     return is_flagged, shock_reason
 
 
-# ══════════════════════════════════════════════════════════
-# 5. WRITE FORECASTS TO DATABASE
-# ══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+# 5. WRITE FORECASTS TO DB
+# ═══════════════════════════════════════════════════════════
 
 def write_forecasts(forecast_df, state_id, commodity_id,
                     historical_mean, historical_std,
                     model_version="prophet_v1.0"):
     """
-    Insert forecast rows into the forecasts table.
-    Skips dates already forecasted today (idempotent).
+    Uses db_adapter.execute so ? placeholders and booleans
+    are translated correctly for PostgreSQL.
+    ON CONFLICT handled via try/except — idempotent.
     """
-    conn = get_connection()
-    cursor= conn.cursor()
-    today = str(date.today())
+    today    = str(date.today())
     inserted = 0
     skipped  = 0
 
     for _, row in forecast_df.iterrows():
-        is_shock, shock_reason = detect_shock(
-            row, historical_mean, historical_std
-        )
-
+        is_shock, shock_reason = detect_shock(row, historical_mean, historical_std)
         try:
-            cursor.execute("""
+            db_execute("""
                 INSERT INTO forecasts (
                     state_id, commodity_id,
                     forecast_date, generated_on,
                     predicted_price, lower_bound, upper_bound,
                     model_version, is_shock_flagged, shock_reason
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT (state_id, commodity_id, forecast_date, generated_on)
-                DO NOTHING
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 int(state_id),
                 int(commodity_id),
@@ -207,65 +157,63 @@ def write_forecasts(forecast_df, state_id, commodity_id,
                 round(float(row["yhat_upper"]), 2),
                 model_version,
                 bool(is_shock),
-                shock_reason
+                shock_reason,
             ))
             inserted += 1
         except Exception as e:
             skipped += 1
-            print(f"      Skipped forecast row: {e}")
+            if "unique" not in str(e).lower() and "duplicate" not in str(e).lower():
+                print(f"      Skipped forecast row: {e}")
 
-    conn.commit()
-    cursor.close()
-    conn.close()
     return inserted, skipped
 
 
-# ══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
 # 6. PIPELINE LOG
-# ══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
 
 def log_run(status, records_in=0, records_out=0, error=None, duration=None):
-    from db_adapter import execute
-    execute("""
-        INSERT INTO pipeline_logs
-        (run_type, status, records_in, records_out, error_message, duration_secs)
-        VALUES (%s, %s, %s, %s, %s, %s)
-    """, ("Forecasting", status, records_in, records_out, error, duration))
+    """Log via db_adapter — handles both SQLite and PostgreSQL."""
+    try:
+        db_execute("""
+            INSERT INTO pipeline_logs
+                (run_type, status, records_in, records_out,
+                 error_message, duration_secs)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, ("Forecasting", status, records_in, records_out, error, duration))
+    except Exception as e:
+        print(f"  Warning: could not write to pipeline_logs: {e}")
 
 
-# ══════════════════════════════════════════════════════════
-# 7. MAIN FORECASTING RUNNER
-# ══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+# 7. MAIN PIPELINE
+# ═══════════════════════════════════════════════════════════
 
 def run_forecasting_pipeline(periods=7, model_version="prophet_v1.0"):
     """
-    Full forecasting pipeline.
-    Loops over all active state + commodity combinations,
-    trains Prophet, generates 7-day forecast, writes to DB.
+    Load all active state+commodity combos → train Prophet →
+    generate 7-day forecast → write to forecasts table.
     """
     start = datetime.now()
-
     print(f"\n{'='*52}")
     print(f"  FORECASTING PIPELINE — {start.strftime('%Y-%m-%d %H:%M')}")
     print(f"  Horizon: {periods} days ahead")
     print(f"{'='*52}\n")
 
-    # Load all active state + commodity combinations
-    conn = get_connection()
-    combos = pd.read_sql("""
+    # Load combos — use db_adapter so boolean filters work
+    combos = db_query("""
         SELECT DISTINCT
             cp.state_id,
             cp.commodity_id,
-            s.name  AS state_name,
-            c.name  AS commodity_name
-        FROM cleaned_prices cp
-        JOIN states      s ON cp.state_id     = s.id
-        JOIN commodities c ON cp.commodity_id = c.id
-        WHERE cp.is_outlier IS NOT TRUE
-          AND cp.is_confirmed IS TRUE
+            s.name AS state_name,
+            c.name AS commodity_name
+        FROM   cleaned_prices cp
+        JOIN   states      s ON cp.state_id     = s.id
+        JOIN   commodities c ON cp.commodity_id = c.id
+        WHERE  cp.is_outlier   = 0
+          AND  cp.is_confirmed = 1
         ORDER BY c.name, s.name
-    """, conn)
-    conn.close()
+    """)
 
     total_combos   = len(combos)
     total_inserted = 0
@@ -281,34 +229,26 @@ def run_forecasting_pipeline(periods=7, model_version="prophet_v1.0"):
         state_name     = row["state_name"]
         commodity_name = row["commodity_name"]
         label          = f"{commodity_name} / {state_name}"
-
         print(f"  [{i+1}/{total_combos}] {label}")
 
         try:
-            # Load training data
             df = load_training_data(state_id, commodity_id)
             if df is None:
-                print(f"    ⚠ Insufficient data — skipping.")
+                print(f"    ⚠ Insufficient data (need {MIN_ROWS} rows) — skipping.")
                 skipped_combos.append(label)
                 continue
 
-            # Historical stats for shock detection
-            hist_mean = df["y"].mean()
-            hist_std  = df["y"].std()
+            hist_mean = float(df["y"].mean())
+            hist_std  = float(df["y"].std())
 
-            # Train model
-            model = train_prophet(df, commodity_name)
-
-            # Generate forecast
+            model    = train_prophet(df, commodity_name)
             forecast = generate_forecast(model, periods=periods)
 
-            # Count shocks before writing
             shocks_this = sum(
                 detect_shock(r, hist_mean, hist_std)[0]
                 for _, r in forecast.iterrows()
             )
 
-            # Write to database
             inserted, skipped = write_forecasts(
                 forecast, state_id, commodity_id,
                 hist_mean, hist_std, model_version
@@ -326,83 +266,59 @@ def run_forecasting_pipeline(periods=7, model_version="prophet_v1.0"):
             skipped_combos.append(label)
 
     duration = (datetime.now() - start).total_seconds()
-    log_run("Success", total_combos, total_inserted,
-            duration=round(duration, 2))
+    log_run("Success", total_combos, total_inserted, duration=round(duration, 2))
 
     print(f"\n{'='*52}")
-    print(f"  ✓ Forecasting complete in {round(duration, 1)}s")
+    print(f"  ✓ Forecasting complete in {round(duration,1)}s")
     print(f"  Combinations:   {total_combos}")
     print(f"  Forecast days:  {total_inserted}")
     print(f"  High-risk days: {total_shocks}")
     print(f"  Skipped combos: {len(skipped_combos)}")
-    if skipped_combos:
-        for s in skipped_combos:
-            print(f"    - {s}")
+    for s in skipped_combos:
+        print(f"    - {s}")
     print(f"{'='*52}\n")
 
     return total_inserted
 
 
-# ══════════════════════════════════════════════════════════
-# 8. QUICK INSPECTION HELPER
-# ══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+# 8. PREVIEW HELPER
+# ═══════════════════════════════════════════════════════════
 
 def preview_forecasts(commodity_name=None, state_name=None, n=7):
-    """
-    Print a readable preview of the latest forecasts.
-    Use in Jupyter to inspect results after running pipeline.
-
-    Usage:
-        preview_forecasts()                          # All
-        preview_forecasts(commodity_name="Yam")      # One commodity
-        preview_forecasts(state_name="Lagos")        # One state
-    """
-    conn = get_connection()
-
-    query = """
-        SELECT
-            f.forecast_date,
-            s.name          AS state,
-            c.name          AS commodity,
-            f.predicted_price,
-            f.lower_bound,
-            f.upper_bound,
-            f.is_shock_flagged,
-            f.shock_reason
-        FROM forecasts f
-        JOIN states      s ON f.state_id     = s.id
-        JOIN commodities c ON f.commodity_id = c.id
-        WHERE f.generated_on = DATE('now')
+    """Print latest forecasts. Use in Jupyter."""
+    sql    = """
+        SELECT f.forecast_date, s.name AS state, c.name AS commodity,
+               f.predicted_price, f.lower_bound, f.upper_bound,
+               f.is_shock_flagged, f.shock_reason
+        FROM   forecasts f
+        JOIN   states      s ON f.state_id     = s.id
+        JOIN   commodities c ON f.commodity_id = c.id
+        WHERE  f.generated_on = CURRENT_DATE
     """
     params = []
     if commodity_name:
-        query  += " AND c.name = %s"
-        params.append(commodity_name)
+        sql += " AND c.name = ?"; params.append(commodity_name)
     if state_name:
-        query  += " AND s.name = %s"
-        params.append(state_name)
-
-    query += " ORDER BY c.name, s.name, f.forecast_date LIMIT %s"
+        sql += " AND s.name = ?"; params.append(state_name)
+    sql += " ORDER BY c.name, s.name, f.forecast_date LIMIT ?"
     params.append(n * 10)
 
-    df = pd.read_sql(query, conn, params=params)
-    conn.close()
+    df = db_query(sql, tuple(params))
 
     if df.empty:
-        print("No forecasts found for today. Run run_forecasting_pipeline() first.")
+        print("No forecasts for today. Run run_forecasting_pipeline() first.")
         return df
 
-    # Format for readability
     df["predicted_price"] = df["predicted_price"].apply(lambda x: f"₦{x:,.0f}")
     df["lower_bound"]     = df["lower_bound"].apply(lambda x: f"₦{x:,.0f}")
     df["upper_bound"]     = df["upper_bound"].apply(lambda x: f"₦{x:,.0f}")
     df["risk"]            = df["is_shock_flagged"].apply(
-                                lambda x: "⚠ HIGH RISK" if x else "✓ Normal"
-                            )
+                                lambda x: "⚠ HIGH RISK" if x else "✓ Normal")
     df = df.drop(columns=["is_shock_flagged", "shock_reason"])
 
     print(f"\n{'='*80}")
-    print(f"  FORECAST PREVIEW — Generated {date.today()}")
+    print(f"  FORECAST PREVIEW — {date.today()}")
     print(f"{'='*80}")
     print(df.to_string(index=False))
     print(f"{'='*80}\n")
@@ -411,5 +327,4 @@ def preview_forecasts(commodity_name=None, state_name=None, n=7):
 
 if __name__ == "__main__":
     run_forecasting_pipeline(periods=7)
-    print("\nPreview of results:")
     preview_forecasts()
