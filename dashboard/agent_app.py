@@ -85,7 +85,7 @@ market_name = st.session_state.get("agent_market", "Assigned Market")
 top_col1, top_col2 = st.columns([3, 1])
 with top_col1:
     try:
-        st.image("557790.png", width=180) 
+        st.image("TradeFlow logo.png", width=180) 
     except FileNotFoundError:
         st.markdown(f"**TradeFlow** NG", unsafe_allow_html=True)
 
@@ -95,7 +95,7 @@ with top_col2:
         st.rerun()
 
 try:
-    st.image("585899.jpg", use_column_width=True, caption="Real-time Market Intelligence")
+    st.image("TradeFlow profile.jpg", use_column_width=True, caption="Real-time Market Intelligence")
 except FileNotFoundError:
     pass
 
