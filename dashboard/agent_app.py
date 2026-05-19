@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from auth import require_agent_login, agent_logout
 from db_adapter import query, execute, get_connection, backend_name
 
-LOGO_FULL = os.path.join(os.path.dirname(__file__), 'assets', 'TradeFlow profile.jpg')
+LOGO_FULL = os.path.join(os.path.dirname(__file__), 'assets', 'TradeFlow profile.png')
 LOGO_ICON = os.path.join(os.path.dirname(__file__), 'assets', 'TradeFlow logo.png')
 
 st.set_page_config(
