@@ -465,23 +465,7 @@ sid         = st.session_state.get("agent_state_id", 0)
 # LOGGED IN — VARIABLES
 # ══════════════════════════════════════════════════════════
 # --- TRADEFLOW NG BRANDING START ---
-top_col1, top_col2 = st.columns([4, 1])
-with top_col1:
-    try:
-        # The official TradeFlow NG Logo
-        st.image(LOGO_ICON, width=180) 
-    except FileNotFoundError:
-        st.markdown("### TradeFlow NG")
 
-# (If you have a logout button, you can move it into top_col2 here)
-
-try:
-    # The Market Context / Field Agent Banner
-    st.image(LOGO_FULL, use_column_width=True)
-except FileNotFoundError:
-    pass
-
-st.divider()
 # --- TRADEFLOW NG BRANDING END ---
 
 # ... Your existing welcome message and form continue here ...
