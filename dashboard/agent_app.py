@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from auth import require_agent_login, agent_logout
 from db_adapter import query, execute, get_connection, backend_name
 
-LOGO_FULL = os.path.join(os.path.dirname(__file__), 'assets', 'TradeFlow dark.jpg')
+LOGO_FULL = os.path.join(os.path.dirname(__file__), 'assets', 'TradeFlow profile.jpg')
 LOGO_ICON = os.path.join(os.path.dirname(__file__), 'assets', 'TradeFlow logo.png')
 
 st.set_page_config(
@@ -455,18 +455,37 @@ authenticated, agent_data = require_agent_login()
 if not authenticated:
     st.stop()
 
-agent_id    = agent_data["agent_id"]
-agent_name  = agent_data["agent_name"]
-agent_state = agent_data["agent_state"]
-sid         = agent_data["agent_state_id"]
+agent_id    = st.session_state.get("agent_id", 0)
+agent_name  = st.session_state.get("agent_name", "Field Agent")
+agent_state = st.session_state.get("agent_state", "—")
+sid         = st.session_state.get("agent_state_id", 0)
+
 
 # ══════════════════════════════════════════════════════════
 # LOGGED IN — VARIABLES
 # ══════════════════════════════════════════════════════════
-col_logo, col_spacer = st.columns([1, 3])
-with col_logo:
-    if os.path.exists(LOGO_FULL):
-        st.image(LOGO_FULL, width=160)
+# --- TRADEFLOW NG BRANDING START ---
+top_col1, top_col2 = st.columns([4, 1])
+with top_col1:
+    try:
+        # The official TradeFlow NG Logo
+        st.image(LOGO_ICON, width=180) 
+    except FileNotFoundError:
+        st.markdown("### TradeFlow NG")
+
+# (If you have a logout button, you can move it into top_col2 here)
+
+try:
+    # The Market Context / Field Agent Banner
+    st.image(LOGO_FULL, use_column_width=True)
+except FileNotFoundError:
+    pass
+
+st.divider()
+# --- TRADEFLOW NG BRANDING END ---
+
+# ... Your existing welcome message and form continue here ...
+
 
 # ── Hero header ──────────────────────────────────────────
 
