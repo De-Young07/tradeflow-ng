@@ -148,7 +148,8 @@ def build_profit_matrix(forecasts, supply_prices, corridors, transport_costs):
         for _, supply_row in origin_supply.iterrows():
             commodity_id   = supply_row["commodity_id"]
             commodity_name = supply_row["commodity_name"]
-            buy_price      = supply_row["buy_price"]
+            WHOLESALE_DISCOUNT = 0.18
+            buy_price = supply_row["buy_price"] * (1 - WHOLESALE_DISCOUNT)
 
             dest_forecast = forecasts[
                 (forecasts["state_id"]     == dest_id) &
