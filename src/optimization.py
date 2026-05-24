@@ -79,10 +79,10 @@ def load_supply_prices():
                    FROM   cleaned_prices cp2
                    WHERE  cp2.state_id     = cp.state_id
                      AND  cp2.commodity_id = cp.commodity_id
-                     AND  cp2.is_outlier   = 0
+                     AND  cp2.is_outlier   = FALSE
                )
-          AND  cp.is_outlier   = 0
-          AND  cp.is_confirmed = 1
+          AND  cp.is_outlier   = FALSE
+          AND  cp.is_confirmed = TRUE
     """)
     print(f"  Loaded {len(df)} current supply prices.")
     return df
