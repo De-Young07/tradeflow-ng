@@ -38,8 +38,8 @@ def load_training_data(state_id, commodity_id):
         FROM   cleaned_prices
         WHERE  state_id     = ?
           AND  commodity_id = ?
-          AND  is_outlier   = 0
-          AND  is_confirmed = 1
+          AND  is_outlier   = FALSE 
+          AND  is_confirmed = TRUE
           AND  price_date   IS NOT NULL
         ORDER BY price_date
     """, (state_id, commodity_id))
@@ -210,8 +210,8 @@ def run_forecasting_pipeline(periods=7, model_version="prophet_v1.0"):
         FROM   cleaned_prices cp
         JOIN   states      s ON cp.state_id     = s.id
         JOIN   commodities c ON cp.commodity_id = c.id
-        WHERE  cp.is_outlier   = 0
-          AND  cp.is_confirmed = 1
+        WHERE  cp.is_outlier   = FALSE 
+          AND  cp.is_confirmed = TRUE
         ORDER BY c.name, s.name
     """)
 
