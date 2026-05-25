@@ -86,12 +86,38 @@ html, body, [class*="css"] {{
     border: 1.5px solid #C8DED0 !important;
     border-radius: 10px !important;
 }}
+/* Labels outside forms → white (on dark background) */
 .stTextInput label, .stNumberInput label,
 .stTextArea label, .stSelectbox label,
 .stDateInput label {{
     color: rgba(255,255,255,0.85) !important;
     font-weight: 600 !important;
     font-size: 0.88rem !important;
+}}
+
+/* Labels INSIDE st.form → dark (on white form background) */
+[data-testid="stForm"] .stTextInput label,
+[data-testid="stForm"] .stNumberInput label,
+[data-testid="stForm"] .stTextArea label,
+[data-testid="stForm"] .stSelectbox label,
+[data-testid="stForm"] .stDateInput label,
+[data-testid="stForm"] label {{
+    color: #1A1A1A !important;
+    font-weight: 600 !important;
+}}
+
+/* Form container itself - white background */
+[data-testid="stForm"] {{
+    background: rgba(255,255,255,0.97) !important;
+    border-radius: 18px !important;
+    padding: 20px 24px !important;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.13) !important;
+}}
+
+/* Selectbox dropdown text always dark */
+.stSelectbox [data-baseweb="select"] span,
+.stSelectbox [data-baseweb="select"] div {{
+    color: #1A1A1A !important;
 }}
 
 /* ── Logo container ── */
@@ -307,12 +333,29 @@ html, body, [class*="css"] {{
 }}
 
 /* ── Forms ── */
-.stForm {{
-    background: rgba(255,255,255,0.97) !important;
-    border-radius: 18px !important;
-    padding: 20px !important;
-    box-shadow: 0 4px 18px rgba(0,0,0,0.13) !important;
-    animation: cardIn 0.4s ease-out;
+/* Remove duplicate - handled by the scoped rule above */
+
+/* ── Headings on dark background → white ── */
+h1, h2, h3, h4 {{
+    color: #ffffff !important;
+    font-family: 'Plus Jakarta Sans', sans-serif !important;
+}}
+
+/* Streamlit's native st.title / st.subheader elements */
+[data-testid="stHeadingWithActionElements"] h1,
+[data-testid="stHeadingWithActionElements"] h2,
+[data-testid="stHeadingWithActionElements"] h3 {{
+    color: #ffffff !important;
+}}
+
+/* Section header label */
+.section-hdr {{
+    color: rgba(255,255,255,0.45) !important;
+}}
+
+/* st.caption and st.info on dark background */
+[data-testid="stCaptionContainer"] p {{
+    color: rgba(255,255,255,0.55) !important;
 }}
 
 /* ── Buttons ── */

@@ -161,6 +161,26 @@ h3 { font-weight: 600 !important; color: #1A6B3C !important; }
 
 /* Divider */
 hr { border-color: rgba(26,107,60,0.1) !important; }
+
+/* Main content area - force white background so headers readable */
+.main { background: #F5F5F5 !important; }
+.main .block-container { background: #F5F5F5 !important; }
+
+/* Page headers - force dark on light background */
+h1 { color: #0D1F14 !important; font-weight: 800 !important; letter-spacing:-0.02em !important; }
+h2 { color: #1A1A1A !important; font-weight: 700 !important; }
+h3 { color: #1A6B3C !important; font-weight: 600 !important; }
+p, li, .stMarkdown { color: #1A1A1A !important; }
+.stCaption, [data-testid="stCaptionContainer"] * { color: #6B7A70 !important; }
+
+/* Form labels - dark text on white form backgrounds */
+.stForm label,
+.stTextInput label, .stNumberInput label,
+.stSelectbox label, .stTextArea label,
+.stDateInput label, .stFileUploader label {
+    color: #1A1A1A !important;
+    font-weight: 600 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -275,13 +295,20 @@ with st.sidebar:
         n_prices = int(query("SELECT COUNT(*) AS n FROM cleaned_prices").iloc[0]["n"])
         today_s  = str(date.today())
 
+        # Convert to string safely — PostgreSQL returns datetime objects
+        last_fc_s  = str(last_fc)[:10]  if last_fc  else None
+        last_opt_s = str(last_opt)[:10] if last_opt else None
+
+        fc_ok  = last_fc_s  == today_s
+        opt_ok = last_opt_s == today_s
+
         st.markdown("**System Status**")
-        st.markdown(f"{'🟢' if last_fc  == today_s else '🟡'} Forecasts: `{last_fc  or 'Never'}`")
-        st.markdown(f"{'🟢' if last_opt == today_s else '🟡'} Optimizer: `{last_opt or 'Never'}`")
+        st.markdown(f"{'🟢' if fc_ok  else '🟡'} Forecasts: `{last_fc_s  or 'Never'}`")
+        st.markdown(f"{'🟢' if opt_ok else '🟡'} Optimizer: `{last_opt_s or 'Never'}`")
         st.markdown(f"🟢 Price records: `{n_prices:,}`")
-        if last_fc != today_s:
+        if not fc_ok:
             st.warning("Forecasts not run today")
-        if last_opt != today_s:
+        if not opt_ok:
             st.warning("Optimizer not run today")
     except Exception as e:
         st.error(f"Status error: {e}")
@@ -583,8 +610,18 @@ elif tab == "📋 Tableau":
         JOIN   forecasts f
                ON  f.state_id      = corr.dest_state_id
                AND f.commodity_id  = c.id
-               AND f.forecast_date = (CURRENT_DATE + INTERVAL '1 day')
-               AND f.generated_on  = CURRENT_DATE
+               AND f.forecast_date = (
+                   SELECT MAX(f2.forecast_date)
+                   FROM   forecasts f2
+                   WHERE  f2.state_id     = corr.dest_state_id
+                     AND  f2.commodity_id = c.id
+               )
+               AND f.generated_on  = (
+                   SELECT MAX(f3.generated_on)
+                   FROM   forecasts f3
+                   WHERE  f3.state_id     = corr.dest_state_id
+                     AND  f3.commodity_id = c.id
+               )
         LEFT JOIN transport_costs tc
                ON  tc.corridor_id  = corr.id
                AND tc.commodity_id = c.id
@@ -1005,11 +1042,11 @@ elif tab == "⚙️ Data Management":
 
     # ── CSV Upload ─────────────────────────────────────────
     st.subheader("📂 Upload Agent Price Reports")
+    import tempfile  # ensure available in both columns
     cu1, cu2 = st.columns([3, 1])
     with cu1:
         uploaded = st.file_uploader("Upload CSV or Excel", type=["csv","xlsx"])
         if uploaded:
-            import tempfile
             suffix = ".csv" if uploaded.name.endswith(".csv") else ".xlsx"
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 tmp.write(uploaded.read()); tmp_path = tmp.name
@@ -1026,9 +1063,10 @@ elif tab == "⚙️ Data Management":
         st.markdown("**Need the template?**")
         try:
             from csv_uploader import generate_template
-            tmp2 = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
-            generate_template(tmp2.name)
-            with open(tmp2.name) as f:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode='w') as tmp2:
+                tmp2_name = tmp2.name
+            generate_template(tmp2_name)
+            with open(tmp2_name) as f:
                 tpl = f.read()
             st.download_button("⬇️ Template CSV", data=tpl,
                                file_name="agent_template.csv", mime="text/csv")
