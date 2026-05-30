@@ -81,8 +81,9 @@ def train_prophet(df, commodity_name=""):
 def generate_forecast(model, periods=7):
     future   = model.make_future_dataframe(periods=periods, freq="D")
     forecast = model.predict(future)
-    today    = pd.Timestamp(date.today()) - pd.Timedelta(days=1)
-    forecast = forecast[forecast["ds"] > today].copy()
+    # Filter to only future dates — strictly after today
+    today    = pd.Timestamp(date.today())
+    forecast = forecast[forecast["ds"] > today].head(periods).copy()
     forecast = forecast[["ds", "yhat", "yhat_lower", "yhat_upper"]].copy()
     forecast["yhat"]       = forecast["yhat"].clip(lower=0)
     forecast["yhat_lower"] = forecast["yhat_lower"].clip(lower=0)
@@ -128,14 +129,33 @@ def detect_shock(forecast_row, historical_mean, historical_std,
 def write_forecasts(forecast_df, state_id, commodity_id,
                     historical_mean, historical_std,
                     model_version="prophet_v1.0"):
+    """
+    Delete-then-insert approach — avoids ON CONFLICT translation issues.
+    Deletes existing forecasts for this state-commodity before inserting fresh ones.
+    """
     today    = str(date.today())
     inserted = 0
     skipped  = 0
 
+    if forecast_df.empty:
+        return 0, 0
+
+    # Step 1 — Delete any existing forecasts for this combo
+    # so we can write fresh ones cleanly
+    try:
+        db_execute("""
+            DELETE FROM forecasts
+            WHERE state_id     = ?
+              AND commodity_id = ?
+              AND generated_on = ?
+        """, (int(state_id), int(commodity_id), today))
+    except Exception as e:
+        print(f"      Warning on delete: {e}")
+
+    # Step 2 — Insert fresh forecasts
     for _, row in forecast_df.iterrows():
         is_shock, shock_reason = detect_shock(row, historical_mean, historical_std)
         try:
-            # PostgreSQL upsert — updates if same date already exists
             db_execute("""
                 INSERT INTO forecasts (
                     state_id, commodity_id,
@@ -143,26 +163,22 @@ def write_forecasts(forecast_df, state_id, commodity_id,
                     predicted_price, lower_bound, upper_bound,
                     model_version, is_shock_flagged, shock_reason
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (state_id, commodity_id, forecast_date)
-                DO UPDATE SET
-                    predicted_price  = EXCLUDED.predicted_price,
-                    lower_bound      = EXCLUDED.lower_bound,
-                    upper_bound      = EXCLUDED.upper_bound,
-                    generated_on     = EXCLUDED.generated_on,
-                    is_shock_flagged = EXCLUDED.is_shock_flagged,
-                    shock_reason     = EXCLUDED.shock_reason
             """, (
-                int(state_id), int(commodity_id),
-                str(row["ds"])[:10], today,
+                int(state_id),
+                int(commodity_id),
+                str(row["ds"])[:10],
+                today,
                 round(float(row["yhat"]),       2),
                 round(float(row["yhat_lower"]), 2),
                 round(float(row["yhat_upper"]), 2),
-                model_version, bool(is_shock), shock_reason,
+                model_version,
+                bool(is_shock),
+                shock_reason,
             ))
             inserted += 1
         except Exception as e:
             skipped += 1
-            print(f"      Skipped: {e}")
+            print(f"      Skipped row: {e}")
 
     return inserted, skipped
 
