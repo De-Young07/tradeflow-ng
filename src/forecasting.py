@@ -128,11 +128,6 @@ def detect_shock(forecast_row, historical_mean, historical_std,
 def write_forecasts(forecast_df, state_id, commodity_id,
                     historical_mean, historical_std,
                     model_version="prophet_v1.0"):
-    """
-    Uses db_adapter.execute so ? placeholders and booleans
-    are translated correctly for PostgreSQL.
-    ON CONFLICT handled via try/except — idempotent.
-    """
     today    = str(date.today())
     inserted = 0
     skipped  = 0
@@ -140,6 +135,7 @@ def write_forecasts(forecast_df, state_id, commodity_id,
     for _, row in forecast_df.iterrows():
         is_shock, shock_reason = detect_shock(row, historical_mean, historical_std)
         try:
+            # PostgreSQL upsert — updates if same date already exists
             db_execute("""
                 INSERT INTO forecasts (
                     state_id, commodity_id,
@@ -147,23 +143,26 @@ def write_forecasts(forecast_df, state_id, commodity_id,
                     predicted_price, lower_bound, upper_bound,
                     model_version, is_shock_flagged, shock_reason
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (state_id, commodity_id, forecast_date)
+                DO UPDATE SET
+                    predicted_price  = EXCLUDED.predicted_price,
+                    lower_bound      = EXCLUDED.lower_bound,
+                    upper_bound      = EXCLUDED.upper_bound,
+                    generated_on     = EXCLUDED.generated_on,
+                    is_shock_flagged = EXCLUDED.is_shock_flagged,
+                    shock_reason     = EXCLUDED.shock_reason
             """, (
-                int(state_id),
-                int(commodity_id),
-                str(row["ds"])[:10],
-                today,
+                int(state_id), int(commodity_id),
+                str(row["ds"])[:10], today,
                 round(float(row["yhat"]),       2),
                 round(float(row["yhat_lower"]), 2),
                 round(float(row["yhat_upper"]), 2),
-                model_version,
-                bool(is_shock),
-                shock_reason,
+                model_version, bool(is_shock), shock_reason,
             ))
             inserted += 1
         except Exception as e:
             skipped += 1
-            if "unique" not in str(e).lower() and "duplicate" not in str(e).lower():
-                print(f"      Skipped forecast row: {e}")
+            print(f"      Skipped: {e}")
 
     return inserted, skipped
 
@@ -181,54 +180,7 @@ def log_run(status, records_in=0, records_out=0, error=None, duration=None):
                  error_message, duration_secs)
             VALUES (?, ?, ?, ?, ?, ?)
         """, ("Forecasting", status, records_in, records_out, error, duration))
-    except Exception as e:
-        print(f"  Warning: could not write to pipeline_logs: {e}")
-
-
-# ═══════════════════════════════════════════════════════════
-# 7. MAIN PIPELINE
-# ═══════════════════════════════════════════════════════════
-
-def run_forecasting_pipeline(periods=7, model_version="prophet_v1.0"):
-    """
-    Load all active state+commodity combos → train Prophet →
-    generate 7-day forecast → write to forecasts table.
-    """
-    start = datetime.now()
-    print(f"\n{'='*52}")
-    print(f"  FORECASTING PIPELINE — {start.strftime('%Y-%m-%d %H:%M')}")
-    print(f"  Horizon: {periods} days ahead")
-    print(f"{'='*52}\n")
-
-    # Load combos — use db_adapter so boolean filters work
-    combos = db_query("""
-        SELECT DISTINCT
-            cp.state_id,
-            cp.commodity_id,
-            s.name AS state_name,
-            c.name AS commodity_name
-        FROM   cleaned_prices cp
-        JOIN   states      s ON cp.state_id     = s.id
-        JOIN   commodities c ON cp.commodity_id = c.id
-        WHERE  cp.is_outlier   = FALSE 
-          AND  cp.is_confirmed = TRUE
-        ORDER BY c.name, s.name
-    """)
-
-    total_combos   = len(combos)
-    total_inserted = 0
-    total_skipped  = 0
-    total_shocks   = 0
-    skipped_combos = []
-
-    print(f"  Found {total_combos} state-commodity combinations to forecast.\n")
-
-    for i, row in combos.iterrows():
-        state_id       = row["state_id"]
-        commodity_id   = row["commodity_id"]
-        state_name     = row["state_name"]
-        commodity_name = row["commodity_name"]
-        label          = f"{commodity_name} / {state_name}"
+    except Excep    label          = f"{commodity_name} / {state_name}"
         print(f"  [{i+1}/{total_combos}] {label}")
 
         try:
