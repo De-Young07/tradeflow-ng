@@ -78,16 +78,29 @@ def train_prophet(df, commodity_name=""):
 # 3. GENERATE FORECAST
 # ═══════════════════════════════════════════════════════════
 
-def generate_forecast(model, periods=7):
-    future   = model.make_future_dataframe(periods=periods, freq="D")
+def generate_forecast(model, df_train, periods=7):
+    """
+    Dynamically calculates periods needed to bridge from the last
+    training data point to today + 7 days ahead.
+    """
+    last_date = pd.Timestamp(df_train["ds"].max())
+    today     = pd.Timestamp(date.today())
+    
+    # How many days from last training point to today
+    days_gap      = max((today - last_date).days, 0)
+    # Total periods = gap + how many future days we want
+    total_periods = days_gap + periods
+
+    future   = model.make_future_dataframe(periods=total_periods, freq="D")
     forecast = model.predict(future)
-    # Filter to only future dates — strictly after today
-    today    = pd.Timestamp(date.today())
+
+    # Now filter to only FUTURE dates (after today)
     forecast = forecast[forecast["ds"] > today].head(periods).copy()
     forecast = forecast[["ds", "yhat", "yhat_lower", "yhat_upper"]].copy()
     forecast["yhat"]       = forecast["yhat"].clip(lower=0)
     forecast["yhat_lower"] = forecast["yhat_lower"].clip(lower=0)
     forecast["yhat_upper"] = forecast["yhat_upper"].clip(lower=0)
+
     return forecast
 
 
@@ -142,15 +155,16 @@ def write_forecasts(forecast_df, state_id, commodity_id,
 
     # Step 1 — Delete any existing forecasts for this combo
     # so we can write fresh ones cleanly
-    try:
+    for _, row in forecast_df.iterrows():
+        ...
         db_execute("""
-            DELETE FROM forecasts
-            WHERE state_id     = ?
-              AND commodity_id = ?
-              AND generated_on = ?
-        """, (int(state_id), int(commodity_id), today))
-    except Exception as e:
-        print(f"      Warning on delete: {e}")
+            INSERT INTO forecasts (
+                state_id, commodity_id, forecast_date, generated_on,
+                predicted_price, lower_bound, upper_bound,
+                model_version, is_shock_flagged, shock_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (...))
+        inserted += 1
 
     # Step 2 — Insert fresh forecasts
     for _, row in forecast_df.iterrows():
