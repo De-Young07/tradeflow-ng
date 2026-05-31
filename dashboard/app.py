@@ -275,7 +275,7 @@ with st.sidebar:
     st.caption("Internal Control Dashboard")
     st.divider()
 
-    tab = st.radio("", [
+    tab = st.radio("Navigation", [
         "📊 Overview",
         "🚚 Recommendations",
         "📋 Tableau",
