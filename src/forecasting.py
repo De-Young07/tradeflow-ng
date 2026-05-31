@@ -263,6 +263,102 @@ def log_run(status, records_in=0, records_out=0, error=None, duration=None):
     return total_inserted
 
 
+
+# ═══════════════════════════════════════════════════════════
+# 7. MAIN PIPELINE
+# ═══════════════════════════════════════════════════════════
+
+def run_forecasting_pipeline(periods=7, model_version="prophet_v1.0"):
+    """
+    Load all active state+commodity combos → train Prophet →
+    generate 7-day forecast → write to forecasts table.
+    """
+    start = datetime.now()
+    print(f"\n{'='*52}")
+    print(f"  FORECASTING PIPELINE — {start.strftime('%Y-%m-%d %H:%M')}")
+    print(f"  Horizon: {periods} days ahead")
+    print(f"{'='*52}\n")
+
+    # Load combos — use db_adapter so boolean filters work
+    combos = db_query("""
+        SELECT DISTINCT
+            cp.state_id,
+            cp.commodity_id,
+            s.name AS state_name,
+            c.name AS commodity_name
+        FROM   cleaned_prices cp
+        JOIN   states      s ON cp.state_id     = s.id
+        JOIN   commodities c ON cp.commodity_id = c.id
+        WHERE  cp.is_outlier   = 0
+          AND  cp.is_confirmed = 1
+        ORDER BY c.name, s.name
+    """)
+
+    total_combos   = len(combos)
+    total_inserted = 0
+    total_skipped  = 0
+    total_shocks   = 0
+    skipped_combos = []
+
+    print(f"  Found {total_combos} state-commodity combinations to forecast.\n")
+
+    for i, row in combos.iterrows():
+        state_id       = row["state_id"]
+        commodity_id   = row["commodity_id"]
+        state_name     = row["state_name"]
+        commodity_name = row["commodity_name"]
+        label          = f"{commodity_name} / {state_name}"
+        print(f"  [{i+1}/{total_combos}] {label}")
+
+        try:
+            df = load_training_data(state_id, commodity_id)
+            if df is None:
+                print(f"    ⚠ Insufficient data (need {MIN_ROWS} rows) — skipping.")
+                skipped_combos.append(label)
+                continue
+
+            hist_mean = float(df["y"].mean())
+            hist_std  = float(df["y"].std())
+
+            model    = train_prophet(df, commodity_name)
+            forecast = generate_forecast(model, df, periods=periods)
+
+            shocks_this = sum(
+                detect_shock(r, hist_mean, hist_std)[0]
+                for _, r in forecast.iterrows()
+            )
+
+            inserted, skipped = write_forecasts(
+                forecast, state_id, commodity_id,
+                hist_mean, hist_std, model_version
+            )
+
+            total_inserted += inserted
+            total_skipped  += skipped
+            total_shocks   += shocks_this
+
+            shock_tag = f" ⚠ {shocks_this} HIGH-RISK days" if shocks_this else ""
+            print(f"    ✓ {inserted} forecast days written.{shock_tag}")
+
+        except Exception as e:
+            print(f"    ✗ Failed: {e}")
+            skipped_combos.append(label)
+
+    duration = (datetime.now() - start).total_seconds()
+    log_run("Success", total_combos, total_inserted, duration=round(duration, 2))
+
+    print(f"\n{'='*52}")
+    print(f"  ✓ Forecasting complete in {round(duration,1)}s")
+    print(f"  Combinations:   {total_combos}")
+    print(f"  Forecast days:  {total_inserted}")
+    print(f"  High-risk days: {total_shocks}")
+    print(f"  Skipped combos: {len(skipped_combos)}")
+    for s in skipped_combos:
+        print(f"    - {s}")
+    print(f"{'='*52}\n")
+
+    return total_inserted
+
 # ═══════════════════════════════════════════════════════════
 # 8. PREVIEW HELPER
 # ═══════════════════════════════════════════════════════════
