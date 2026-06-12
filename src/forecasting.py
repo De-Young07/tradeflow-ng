@@ -210,57 +210,8 @@ def log_run(status, records_in=0, records_out=0, error=None, duration=None):
                  error_message, duration_secs)
             VALUES (?, ?, ?, ?, ?, ?)
         """, ("Forecasting", status, records_in, records_out, error, duration))
-    except Excep    label          = f"{commodity_name} / {state_name}"
-        print(f"  [{i+1}/{total_combos}] {label}")
-
-        try:
-            df = load_training_data(state_id, commodity_id)
-            if df is None:
-                print(f"    ⚠ Insufficient data (need {MIN_ROWS} rows) — skipping.")
-                skipped_combos.append(label)
-                continue
-
-            hist_mean = float(df["y"].mean())
-            hist_std  = float(df["y"].std())
-
-            model    = train_prophet(df, commodity_name)
-            forecast = generate_forecast(model, periods=periods)
-
-            shocks_this = sum(
-                detect_shock(r, hist_mean, hist_std)[0]
-                for _, r in forecast.iterrows()
-            )
-
-            inserted, skipped = write_forecasts(
-                forecast, state_id, commodity_id,
-                hist_mean, hist_std, model_version
-            )
-
-            total_inserted += inserted
-            total_skipped  += skipped
-            total_shocks   += shocks_this
-
-            shock_tag = f" ⚠ {shocks_this} HIGH-RISK days" if shocks_this else ""
-            print(f"    ✓ {inserted} forecast days written.{shock_tag}")
-
-        except Exception as e:
-            print(f"    ✗ Failed: {e}")
-            skipped_combos.append(label)
-
-    duration = (datetime.now() - start).total_seconds()
-    log_run("Success", total_combos, total_inserted, duration=round(duration, 2))
-
-    print(f"\n{'='*52}")
-    print(f"  ✓ Forecasting complete in {round(duration,1)}s")
-    print(f"  Combinations:   {total_combos}")
-    print(f"  Forecast days:  {total_inserted}")
-    print(f"  High-risk days: {total_shocks}")
-    print(f"  Skipped combos: {len(skipped_combos)}")
-    for s in skipped_combos:
-        print(f"    - {s}")
-    print(f"{'='*52}\n")
-
-    return total_inserted
+    except Exception as e:
+        print(f"  Warning: could not write to pipeline_logs: {e}")
 
 
 
