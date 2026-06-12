@@ -240,8 +240,8 @@ def run_forecasting_pipeline(periods=7, model_version="prophet_v1.0"):
         FROM   cleaned_prices cp
         JOIN   states      s ON cp.state_id     = s.id
         JOIN   commodities c ON cp.commodity_id = c.id
-        WHERE  cp.is_outlier   = 0
-          AND  cp.is_confirmed = 1
+        WHERE  cp.is_outlier   = FALSE
+          AND  cp.is_confirmed = TRUE
         ORDER BY c.name, s.name
     """)
 
