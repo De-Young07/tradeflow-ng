@@ -155,16 +155,15 @@ def write_forecasts(forecast_df, state_id, commodity_id,
 
     # Step 1 — Delete any existing forecasts for this combo
     # so we can write fresh ones cleanly
-    for _, row in forecast_df.iterrows():
-        ...
+    try:
         db_execute("""
-            INSERT INTO forecasts (
-                state_id, commodity_id, forecast_date, generated_on,
-                predicted_price, lower_bound, upper_bound,
-                model_version, is_shock_flagged, shock_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (...))
-        inserted += 1
+            DELETE FROM forecasts
+            WHERE state_id     = ?
+              AND commodity_id = ?
+              AND generated_on = ?
+        """, (int(state_id), int(commodity_id), today))
+    except Exception as e:
+        print(f"      Warning on delete: {e}")
 
     # Step 2 — Insert fresh forecasts
     for _, row in forecast_df.iterrows():
