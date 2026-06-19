@@ -34,6 +34,7 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
+<<<<<<< HEAD
       - name: Install dependencies
         run: |
           pip install --upgrade pip
@@ -66,7 +67,6 @@ jobs:
           fi
 
       - name: Ping health endpoint
-        if: always()
         env:
           API_URL: ${{ secrets.API_URL }}
         run: |
@@ -79,3 +79,36 @@ jobs:
         run: |
           echo "Pipeline failed at $(date -u). Check GitHub Actions logs."
           # Add webhook notification here if needed
+=======
+      # 3. Install dependencies
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 4. Run the pipeline
+      # DATABASE_URL and KOBO_API_TOKEN come from GitHub repository secrets.
+      # To set them: GitHub repo → Settings → Secrets and variables →
+      # Actions → New repository secret
+      - name: Run TradeFlow NG pipeline
+        env:
+          DATABASE_URL:    ${{ secrets.DATABASE_URL }}
+          KOBO_API_TOKEN:  ${{ secrets.KOBO_API_TOKEN }}
+          KOBO_ASSET_UID:  ${{ secrets.KOBO_ASSET_UID }}
+        run: |
+          MODE="${{ github.event.inputs.mode || 'full' }}"
+          if [ "$MODE" = "full" ]; then
+            python src/scheduler.py
+          elif [ "$MODE" = "kobo-only" ]; then
+            python src/scheduler.py --kobo-only
+          elif [ "$MODE" = "forecast-only" ]; then
+            python src/scheduler.py --forecast-only
+          elif [ "$MODE" = "optimize-only" ]; then
+            python src/scheduler.py --optimize-only
+          elif [ "$MODE" = "accuracy" ]; then
+            python src/scheduler.py --accuracy
+          fi
+
+      # 5. Notify on failure (optional — remove if not needed)
+      - name: Notify on failure
+        if: failure()
