@@ -1,0 +1,81 @@
+name: TradeFlow NG — Daily Pipeline
+
+on:
+  schedule:
+    # 06:00 WAT = 05:00 UTC every day
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Stage to run (all / kobo / cleaning / forecasting / optimization)"
+        required: false
+        default: "all"
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      DATABASE_URL:      ${{ secrets.DATABASE_URL }}
+      JWT_SECRET:        ${{ secrets.JWT_SECRET }}
+      KOBO_API_TOKEN:    ${{ secrets.KOBO_API_TOKEN }}
+      KOBO_ASSET_UID:    ${{ secrets.KOBO_ASSET_UID }}
+      ADMIN_USERNAME:    ${{ secrets.ADMIN_USERNAME }}
+      ADMIN_PASSWORD:    ${{ secrets.ADMIN_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run pipeline
+        working-directory: src
+        run: |
+          STAGE="${{ github.event.inputs.stage || 'all' }}"
+          echo "Running stage: $STAGE"
+
+          if [ "$STAGE" = "all" ] || [ "$STAGE" = "kobo" ]; then
+            echo "── Kobo Ingestion ──"
+            python scheduler.py --kobo-only || true
+          fi
+
+          if [ "$STAGE" = "all" ] || [ "$STAGE" = "cleaning" ]; then
+            echo "── Cleaning ──"
+            python scheduler.py --kobo-only || true
+          fi
+
+          if [ "$STAGE" = "all" ] || [ "$STAGE" = "forecasting" ]; then
+            echo "── Forecasting ──"
+            python scheduler.py --forecast-only || true
+          fi
+
+          if [ "$STAGE" = "all" ] || [ "$STAGE" = "optimization" ]; then
+            echo "── Optimization ──"
+            python scheduler.py --optimize-only || true
+          fi
+
+      - name: Ping health endpoint
+        if: always()
+        env:
+          API_URL: ${{ secrets.API_URL }}
+        run: |
+          if [ -n "$API_URL" ]; then
+            curl -sf "$API_URL/health" && echo "✅ API healthy" || echo "⚠ API health check failed"
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "Pipeline failed at $(date -u). Check GitHub Actions logs."
+          # Add webhook notification here if needed
