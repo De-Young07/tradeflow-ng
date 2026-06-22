@@ -45,7 +45,7 @@ export default function AgentPage() {
             Hello, {firstName}!
           </h1>
           <div className="flex flex-wrap items-center gap-2 mt-2">
-            {agentData?.market && (
+            {!!agentData?.market && (
               <span className="text-xs px-2.5 py-1 rounded-full bg-white/10 text-white/70">
                 📍 {String(agentData.market)}
               </span>
