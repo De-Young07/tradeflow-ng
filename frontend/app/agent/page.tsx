@@ -50,6 +50,11 @@ export default function AgentPage() {
                 📍 {String(agentData.market)}
               </span>
             )}
+            {!!agentData?.state && (
+              <span className="text-xs px-2.5 py-1 rounded-full bg-white/10 text-white/70">
+                {String(agentData.state)} State
+              </span>
+            )}
             {!!agentData?.agent_id && (
               <span className="text-xs px-2.5 py-1 rounded-full font-mono text-gold"
                     style={{ background: "rgba(200,134,10,0.15)", border: "1px solid rgba(200,134,10,0.3)" }}>
@@ -72,7 +77,7 @@ export default function AgentPage() {
       {/* Recommendations */}
       <div className="pb-4">
         <p className="text-white/60 text-xs font-medium uppercase tracking-wide mb-3">
-          Routes for {agentData?.state ?? "Your State"} · This Week
+          Routes for {String(agentData?.state ?? "Your State")} · This Week
         </p>
 
         {loading ? (
