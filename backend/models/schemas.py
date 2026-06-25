@@ -85,3 +85,15 @@ class APIResponse(BaseModel):
     data: Optional[object] = None
     error: Optional[str] = None
     status: str = "ok"
+
+
+class OverviewResponse(BaseModel):
+    total_agents: int
+    active_agents: int
+    total_markets: int
+    total_states: int
+    total_submissions: int
+    last_pipeline_run: Optional[str] = None
+    recommendations_this_week: int
+    platform_status: str = "operational"
+
