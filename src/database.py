@@ -118,6 +118,16 @@ def test_connection():
         return all_ok
 
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+async def get_db() -> AsyncSession:
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
+
+
 if __name__ == "__main__":
     init_database()
     test_connection()
