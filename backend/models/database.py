@@ -54,3 +54,12 @@ def row_to_dict(record):
 
 def rows_to_list(records):
     return [dict(r) for r in records]
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+async def get_db() -> AsyncSession:
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
