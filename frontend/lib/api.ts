@@ -1,6 +1,10 @@
 /**
  * TradeFlow NG — API Client
- * Typed fetch wrappers for all backend endpoints.
+ * All backend endpoint calls, typed.
+ *
+ * Backend route map (after prefixes):
+ *   POST /auth/admin/login   ← admin JWT
+ *   POST /auth/agent/login   ← agent JWT  (was broken: /auth/auth/agent/login)
  */
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -17,32 +21,37 @@ async function apiFetch<T>(
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
-  if (!res.ok) {
-    const text = await res.text();
-    let detail = text;
-    try { detail = JSON.parse(text).detail || text; } catch {}
-    return { data: null as T, error: detail, status: "error" };
+  try {
+    const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+    if (!res.ok) {
+      const text = await res.text();
+      let detail = text;
+      try { detail = JSON.parse(text).detail || text; } catch {}
+      return { data: null as T, error: detail, status: "error" };
+    }
+    return res.json();
+  } catch (err) {
+    return {
+      data: null as T,
+      error: "Cannot reach the TradeFlow NG API. Check your connection.",
+      status: "error",
+    };
   }
-  return res.json();
 }
 
 // ── Auth ──────────────────────────────────────────────────────
 export async function adminLogin(username: string, password: string) {
-  return apiFetch<{ access_token: string }>("/auth/admin/login", {
-    method: "POST",
-    body: JSON.stringify({ username, password }),
-  });
+  return apiFetch<{ access_token: string }>(
+    "/auth/admin/login",           // → /auth/admin/login ✓
+    { method: "POST", body: JSON.stringify({ username, password }) }
+  );
 }
 
 export async function agentLogin(agent_id: string, password: string) {
-  return apiFetch<{
-    access_token: string;
-    agent_data: Record<string, unknown>;
-  }>("/auth/agent/login", {
-    method: "POST",
-    body: JSON.stringify({ agent_id, password }),
-  });
+  return apiFetch<{ access_token: string; agent_data: Record<string, unknown> }>(
+    "/auth/agent/login",           // → /auth/agent/login ✓ (was /auth/auth/agent/login ✗)
+    { method: "POST", body: JSON.stringify({ agent_id, password }) }
+  );
 }
 
 // ── Admin ─────────────────────────────────────────────────────
@@ -61,34 +70,24 @@ export async function getRecommendations(
   return apiFetch<unknown[]>(`/admin/recommendations?${qs}`, {}, token);
 }
 
-export async function getForecasts(
-  token: string,
-  state?: string,
-  commodity?: string
-) {
+export async function getForecasts(token: string, state?: string, commodity?: string) {
   const qs = new URLSearchParams();
   if (state)     qs.set("state",     state);
   if (commodity) qs.set("commodity", commodity);
   return apiFetch<Record<string, unknown>>(`/forecasts/?${qs}`, {}, token);
 }
 
-export async function getPriceTrend(
-  token: string,
-  commodity = "Yam",
-  days = 56
-) {
+export async function getPriceTrend(token: string, commodity = "Yam", days = 56) {
   return apiFetch<unknown[]>(
     `/admin/prices/trend?commodity=${encodeURIComponent(commodity)}&days=${days}`,
-    {},
-    token
+    {}, token
   );
 }
 
 export async function getTableau(token: string, commodity = "Yam") {
   return apiFetch<unknown[]>(
     `/admin/tableau?commodity=${encodeURIComponent(commodity)}`,
-    {},
-    token
+    {}, token
   );
 }
 
@@ -97,17 +96,19 @@ export async function getAgents(token: string) {
 }
 
 export async function createAgent(token: string, body: Record<string, unknown>) {
-  return apiFetch<Record<string, unknown>>("/admin/agents", {
-    method: "POST",
-    body: JSON.stringify(body),
-  }, token);
+  return apiFetch<Record<string, unknown>>(
+    "/admin/agents",
+    { method: "POST", body: JSON.stringify(body) },
+    token
+  );
 }
 
 export async function submitFeedback(token: string, body: Record<string, unknown>) {
-  return apiFetch<Record<string, unknown>>("/admin/feedback", {
-    method: "POST",
-    body: JSON.stringify(body),
-  }, token);
+  return apiFetch<Record<string, unknown>>(
+    "/admin/feedback",
+    { method: "POST", body: JSON.stringify(body) },
+    token
+  );
 }
 
 export async function getDbStats(token: string) {
@@ -148,10 +149,11 @@ export async function getAgentLocalPrices(token: string) {
 }
 
 export async function submitAgentPrice(token: string, body: Record<string, unknown>) {
-  return apiFetch<Record<string, unknown>>("/agent/prices/submit", {
-    method: "POST",
-    body: JSON.stringify(body),
-  }, token);
+  return apiFetch<Record<string, unknown>>(
+    "/agent/prices/submit",
+    { method: "POST", body: JSON.stringify(body) },
+    token
+  );
 }
 
 export async function getAgentSubmissions(token: string) {
@@ -159,10 +161,11 @@ export async function getAgentSubmissions(token: string) {
 }
 
 export async function submitAgentReport(token: string, body: Record<string, unknown>) {
-  return apiFetch<Record<string, unknown>>("/agent/report", {
-    method: "POST",
-    body: JSON.stringify(body),
-  }, token);
+  return apiFetch<Record<string, unknown>>(
+    "/agent/report",
+    { method: "POST", body: JSON.stringify(body) },
+    token
+  );
 }
 
 export async function getAgentLookups(token: string) {
@@ -178,7 +181,7 @@ export async function getHealth() {
   return apiFetch<Record<string, unknown>>("/health");
 }
 
-// ── Formatting helpers ────────────────────────────────────────
+// ── Formatters ────────────────────────────────────────────────
 export function formatNaira(value: number): string {
   return `₦${Math.round(value).toLocaleString("en-NG")}`;
 }
