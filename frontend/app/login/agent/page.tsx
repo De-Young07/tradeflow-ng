@@ -10,8 +10,8 @@ export default function AgentLoginPage() {
   const [agentId, setAgentId] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState("");
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -25,16 +25,16 @@ export default function AgentLoginPage() {
     const res = await agentLogin(agentId.trim().toUpperCase(), password.trim());
 
     if (res.error || !res.data?.access_token) {
-      setError(res.error || "Incorrect Agent ID or password.");
+      setError(res.error || "Incorrect Agent ID or password. Please try again.");
       setLoading(false);
       return;
     }
 
     await fetch("/api/auth/agent", {
-      method: "POST",
+      method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        token: res.data.access_token,
+      body:    JSON.stringify({
+        token:     res.data.access_token,
         agentData: res.data.agent_data,
       }),
     });
@@ -49,18 +49,17 @@ export default function AgentLoginPage() {
     >
       {/* Geometric circle accents */}
       {[
-        { size: 400, top: "-100px", right: "-100px", opacity: 0.06 },
-        { size: 250, bottom: "-80px", left: "-80px",  opacity: 0.05 },
-        { size: 150, top: "30%",     left: "5%",      opacity: 0.04 },
+        { size: 420, top: "-120px", right: "-120px", opacity: 0.07 },
+        { size: 260, bottom: "-90px", left: "-90px",  opacity: 0.06 },
+        { size: 160, top: "35%",     left: "4%",      opacity: 0.05 },
       ].map((c, i) => (
         <div
           key={i}
           className="absolute rounded-full border pointer-events-none"
           style={{
             width: c.size, height: c.size,
-            top: c.top, right: c.right,
-            bottom: c.bottom, left: c.left,
-            borderColor: `rgba(200, 134, 10, ${c.opacity * 3})`,
+            top: c.top, right: c.right, bottom: c.bottom, left: c.left,
+            borderColor: `rgba(200,134,10,${c.opacity * 2.5})`,
             background: `radial-gradient(circle, rgba(26,107,60,${c.opacity}), transparent)`,
           }}
         />
@@ -69,20 +68,39 @@ export default function AgentLoginPage() {
       <div className="relative w-full max-w-sm">
         {/* Logo area */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4"
-               style={{ background: "rgba(26, 107, 60, 0.3)", border: "1px solid rgba(26,107,60,0.4)" }}>
-            <span className="text-3xl">🌾</span>
+          <div className="flex justify-center mb-3">
+            <img
+              src="/logo-icon.png"
+              alt="TradeFlow NG"
+              className="w-16 h-16 object-contain"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
           </div>
-          <h1 className="text-2xl font-heading font-bold text-white">TradeFlow NG</h1>
-          <p className="text-sm text-white/50 mt-1">Field Agent Portal</p>
+          <img
+            src="/logo-full-white.png"
+            alt="TradeFlow NG"
+            className="h-8 object-contain mx-auto"
+            onError={(e) => {
+              const el = e.target as HTMLImageElement;
+              el.style.display = "none";
+              el.insertAdjacentHTML("afterend",
+                '<p style="color:white;font-family:sans-serif;font-size:1.2rem;font-weight:700;">TradeFlow NG</p>'
+              );
+            }}
+          />
+          <p className="text-sm text-white/50 mt-1.5">Field Agent Portal</p>
         </div>
 
         {/* Card */}
         <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
-          <div className="h-1" style={{ background: "linear-gradient(90deg, #1A6B3C, #C8860A)" }} />
+          <div className="h-1"
+               style={{ background: "linear-gradient(90deg, #1A6B3C, #C8860A)" }} />
 
           <div className="p-7">
-            <h2 className="text-base font-heading font-semibold text-gray-800 mb-1">
+            <h2 className="text-base font-semibold text-gray-800 mb-1"
+                style={{ fontFamily: "var(--font-jakarta, sans-serif)" }}>
               Agent Login
             </h2>
             <p className="text-sm text-gray-500 mb-5">
@@ -90,8 +108,7 @@ export default function AgentLoginPage() {
             </p>
 
             {error && (
-              <div className="mb-4 px-3 py-2.5 rounded-lg bg-red-50 border border-red-200
-                              text-sm text-red-700">
+              <div className="mb-4 px-3 py-2.5 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
                 {error}
               </div>
             )}
@@ -127,8 +144,7 @@ export default function AgentLoginPage() {
                   <button
                     type="button"
                     onClick={() => setShowPass(!showPass)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400
-                               hover:text-gray-600"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                   >
                     {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
