@@ -24,11 +24,29 @@ export default function AgentLayout({ children }: { children: React.ReactNode })
       className="min-h-screen flex flex-col"
       style={{ background: "linear-gradient(160deg, #0D1F14 0%, #1A3328 100%)" }}
     >
-      {/* Top bar */}
+      {/* Top header */}
       <header className="flex items-center justify-between px-5 pt-5 pb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-xl">🌾</span>
-          <span className="text-white font-heading font-bold text-base">TradeFlow NG</span>
+        <div className="flex items-center gap-2.5">
+          <img
+            src="/logo-icon.png"
+            alt="TradeFlow NG"
+            className="w-8 h-8 object-contain"
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = "none";
+            }}
+          />
+          <img
+            src="/logo-full-white.png"
+            alt="TradeFlow NG"
+            className="h-6 object-contain"
+            onError={(e) => {
+              const el = e.target as HTMLImageElement;
+              el.style.display = "none";
+              el.insertAdjacentHTML("afterend",
+                '<span style="color:white;font-weight:700;font-family:sans-serif;font-size:0.95rem;">TradeFlow NG</span>'
+              );
+            }}
+          />
         </div>
         <button
           onClick={handleLogout}
@@ -58,14 +76,18 @@ export default function AgentLayout({ children }: { children: React.ReactNode })
                 key={href}
                 href={href}
                 className={clsx(
-                  "flex-1 flex flex-col items-center justify-center py-3 gap-1 text-xs font-medium transition-colors",
-                  active ? "text-gold" : "text-white/40 hover:text-white/70"
+                  "flex-1 flex flex-col items-center justify-center py-3 gap-1 text-xs font-medium transition-colors relative",
+                  active ? "text-yellow-400" : "text-white/40 hover:text-white/70"
                 )}
+                style={active ? { color: "#C8860A" } : {}}
               >
                 <Icon size={20} />
                 <span>{label}</span>
                 {active && (
-                  <div className="absolute bottom-0 h-0.5 w-10 rounded-full bg-gold" />
+                  <div
+                    className="absolute bottom-0 h-0.5 w-10 rounded-full"
+                    style={{ background: "#C8860A" }}
+                  />
                 )}
               </a>
             );
