@@ -2,19 +2,19 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import {
-  LayoutDashboard, TrendingUp, Map, Table2,
-  MessageSquare, Database, LogOut, Activity,
-  ChevronRight,
+  LayoutDashboard, TrendingUp, Activity,
+  Table2, MessageSquare, Database,
+  LogOut, ChevronRight,
 } from "lucide-react";
 import clsx from "clsx";
 
 const NAV = [
-  { href: "/admin",              label: "Overview",        icon: LayoutDashboard },
+  { href: "/admin",                 label: "Overview",        icon: LayoutDashboard },
   { href: "/admin/recommendations", label: "Recommendations", icon: TrendingUp },
-  { href: "/admin/forecasts",    label: "Forecasts",       icon: Activity },
-  { href: "/admin/tableau",      label: "Profit Matrix",   icon: Table2 },
-  { href: "/admin/feedback",     label: "Trade Feedback",  icon: MessageSquare },
-  { href: "/admin/data",         label: "Data & Pipeline", icon: Database },
+  { href: "/admin/forecasts",       label: "Forecasts",       icon: Activity },
+  { href: "/admin/tableau",         label: "Profit Matrix",   icon: Table2 },
+  { href: "/admin/feedback",        label: "Trade Feedback",  icon: MessageSquare },
+  { href: "/admin/data",            label: "Data & Pipeline", icon: Database },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -36,18 +36,37 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         {/* Logo */}
         <div className="px-5 py-5 border-b border-white/10">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
-                 style={{ background: "#1A6B3C" }}>
-              <span className="text-lg">🌾</span>
-            </div>
+            <img
+              src="/logo-icon.png"
+              alt="TradeFlow NG"
+              className="w-9 h-9 object-contain rounded-lg flex-shrink-0"
+              onError={(e) => {
+                const el = e.target as HTMLImageElement;
+                el.style.display = "none";
+                el.insertAdjacentHTML("afterend",
+                  '<div style="width:36px;height:36px;background:#1A6B3C;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="font-size:1.1rem;">🌿</span></div>'
+                );
+              }}
+            />
             <div>
-              <p className="text-sm font-heading font-bold text-white leading-none">TradeFlow NG</p>
+              <img
+                src="/logo-full-white.png"
+                alt="TradeFlow NG"
+                className="h-5 object-contain"
+                onError={(e) => {
+                  const el = e.target as HTMLImageElement;
+                  el.style.display = "none";
+                  el.insertAdjacentHTML("afterend",
+                    '<p style="font-size:0.85rem;font-weight:700;color:white;font-family:sans-serif;">TradeFlow NG</p>'
+                  );
+                }}
+              />
               <p className="text-xs text-white/40 mt-0.5">Admin Panel</p>
             </div>
           </div>
         </div>
 
-        {/* Nav */}
+        {/* Nav links */}
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
           {NAV.map(({ href, label, icon: Icon }) => {
             const active = href === "/admin"
@@ -67,16 +86,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           })}
         </nav>
 
-        {/* System status + logout */}
+        {/* Status + logout */}
         <div className="px-3 py-4 border-t border-white/10 space-y-3">
           <div className="px-4 py-3 rounded-lg bg-white/5">
             <p className="text-xs text-white/40 mb-2 font-medium uppercase tracking-wide">
               System Status
             </p>
             <div className="space-y-1.5">
-              <SystemStatus label="Forecasts" ok />
-              <SystemStatus label="Optimizer" ok />
-              <SystemStatus label="Database"  ok />
+              <StatusRow label="Forecasts" ok />
+              <StatusRow label="Optimizer" ok />
+              <StatusRow label="Database"  ok />
             </div>
           </div>
           <button
@@ -89,7 +108,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
       </aside>
 
-      {/* ── Main ── */}
+      {/* ── Main content ── */}
       <main className="flex-1 overflow-auto">
         {children}
       </main>
@@ -97,15 +116,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   );
 }
 
-function SystemStatus({ label, ok }: { label: string; ok: boolean }) {
+function StatusRow({ label, ok }: { label: string; ok: boolean }) {
   return (
     <div className="flex items-center justify-between">
       <span className="text-xs text-white/60">{label}</span>
-      <span className={clsx(
-        "text-xs font-medium flex items-center gap-1",
-        ok ? "text-green-400" : "text-red-400"
-      )}>
-        <span className={clsx("w-1.5 h-1.5 rounded-full", ok ? "bg-green-400" : "bg-red-400")} />
+      <span className={`text-xs font-medium flex items-center gap-1 ${ok ? "text-green-400" : "text-red-400"}`}>
+        <span className={`w-1.5 h-1.5 rounded-full ${ok ? "bg-green-400" : "bg-red-400"}`} />
         {ok ? "Live" : "Down"}
       </span>
     </div>
