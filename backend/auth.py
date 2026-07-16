@@ -1,6 +1,10 @@
 """
 TradeFlow NG — Authentication
 JWT tokens for admin (username + password) and agent (agent_id + password).
+
+ROUTES (after prefix /auth in main.py):
+  POST /auth/admin/login  → admin JWT
+  POST /auth/agent/login  → agent JWT + profile
 """
 
 import os
@@ -16,42 +20,42 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.database import get_db
 
-router = APIRouter()
+router   = APIRouter()
 security = HTTPBearer()
 
-# ── Config ───────────────────────────────────────────────────
-JWT_SECRET      = os.getenv("JWT_SECRET", "tradeflow-dev-secret-change-in-prod")
-JWT_ALGORITHM   = "HS256"
+# ── Config ──────────────────────────────────────────────────
+JWT_SECRET       = os.getenv("JWT_SECRET", "tradeflow-dev-secret-change-in-prod")
+JWT_ALGORITHM    = "HS256"
 JWT_EXPIRY_HOURS = 24
 
-ADMIN_USERNAME  = os.getenv("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD  = os.getenv("ADMIN_PASSWORD", "tradeflow2026")
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "tradeflow2026")
 
 
-# ── Schemas ──────────────────────────────────────────────────
+# ── Schemas ─────────────────────────────────────────────────
 class AdminLoginRequest(BaseModel):
     username: str
     password: str
 
 class AgentLoginRequest(BaseModel):
     agent_id: str
-    password: str
+    password:  str
 
 class TokenResponse(BaseModel):
     access_token: str
-    token_type: str = "bearer"
+    token_type:   str = "bearer"
 
 class AgentTokenResponse(TokenResponse):
     agent_data: dict
 
 
-# ── JWT helpers ──────────────────────────────────────────────
+# ── JWT helpers ─────────────────────────────────────────────
 def create_token(payload: dict, role: str) -> str:
     data = payload.copy()
     data.update({
         "role": role,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
-        "iat": datetime.now(timezone.utc),
+        "exp":  datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
+        "iat":  datetime.now(timezone.utc),
     })
     return jwt.encode(data, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
@@ -67,7 +71,7 @@ def decode_token(token: str) -> dict:
         )
 
 
-# ── Dependencies ─────────────────────────────────────────────
+# ── Dependencies ────────────────────────────────────────────
 def require_admin(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> dict:
@@ -87,6 +91,7 @@ def require_agent(
 
 
 # ── Admin login ──────────────────────────────────────────────
+# Full path: POST /auth/admin/login  (prefix /auth + this route /admin/login)
 @router.post("/admin/login", response_model=TokenResponse)
 async def admin_login(body: AdminLoginRequest):
     if body.username.strip() != ADMIN_USERNAME or body.password.strip() != ADMIN_PASSWORD:
@@ -94,12 +99,17 @@ async def admin_login(body: AdminLoginRequest):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
         )
-    token = create_token({"sub": body.username, "username": body.username}, role="admin")
+    token = create_token(
+        {"sub": body.username, "username": body.username},
+        role="admin",
+    )
     return {"access_token": token, "token_type": "bearer"}
 
 
 # ── Agent login ──────────────────────────────────────────────
-@router.post("/auth/agent/login", response_model=AgentTokenResponse)
+# Full path: POST /auth/agent/login  (prefix /auth + this route /agent/login)
+# NOTE: was incorrectly /auth/agent/login causing double-prefix → /auth/auth/agent/login
+@router.post("/agent/login", response_model=AgentTokenResponse)
 async def agent_login(body: AgentLoginRequest, db: AsyncSession = Depends(get_db)):
     aid = body.agent_id.strip().upper()
     pwd = body.password.strip()
@@ -135,7 +145,11 @@ async def agent_login(body: AgentLoginRequest, db: AsyncSession = Depends(get_db
         "market":    row["market_name"],
     }
     token = create_token(
-        {"sub": aid, "agent_db_id": row["id"], "state_id": row["state_id"]},
+        {
+            "sub":         aid,
+            "agent_db_id": row["id"],
+            "state_id":    row["state_id"],
+        },
         role="agent",
     )
     return {"access_token": token, "token_type": "bearer", "agent_data": agent_data}
