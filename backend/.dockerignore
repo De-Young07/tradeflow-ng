@@ -1,0 +1,61 @@
+# ── TradeFlow NG — .dockerignore ──────────────────────────────
+# Keeps the build context small and the image clean
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Development & IDE
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Tests
+tests/
+test_*
+*_test.py
+pytest.ini
+.pytest_cache/
+coverage.xml
+.coverage
+htmlcov/
+
+# Docs
+*.md
+docs/
+README*
+
+# Frontend (not needed in backend image)
+../frontend/
+frontend/
+
+# Logs
+*.log
+logs/
+
+# Node (in case repo root has these)
+node_modules/
+.next/
