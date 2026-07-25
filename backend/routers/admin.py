@@ -10,8 +10,8 @@ from typing import Optional
 
 from models.database import get_db
 from models.schemas import (
-    OverviewResponse, Agent, CreateAgentRequest,
-    FeedbackRequest, TableauResponse, TableauCell, APIResponse
+    CreateAgentRequest,
+    FeedbackRequest,
 )
 from auth import require_admin
 
