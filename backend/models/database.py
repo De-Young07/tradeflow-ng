@@ -1,65 +1,55 @@
 """
-TradeFlow NG — Async Database Pool (asyncpg + PostgreSQL/Supabase)
+TradeFlow NG — SQLAlchemy Async Database
+Compatible with FastAPI Depends(get_db)
 """
 
-import asyncpg
 import os
+from typing import AsyncGenerator
 
-pool: asyncpg.Pool | None = None
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+from sqlalchemy.orm import declarative_base
 
+# -------------------------------------------------------------------
+# Database URL
+# -------------------------------------------------------------------
 
-async def init_pool():
-    global pool
-    pool = await asyncpg.create_pool(
-        DATABASE_URL,
-        min_size=2,
-        max_size=10,
-        command_timeout=60,
-    )
+DATABASE_URL = os.getenv("DATABASE_URL")
 
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is not set.")
 
-async def close_pool():
-    global pool
-    if pool:
-        await pool.close()
+# -------------------------------------------------------------------
+# Async Engine
+# -------------------------------------------------------------------
 
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,
+    future=True,
+    pool_pre_ping=True,
+)
 
-async def fetch(sql: str, *args):
-    async with pool.acquire() as conn:
-        return await conn.fetch(sql, *args)
+# -------------------------------------------------------------------
+# Session Factory
+# -------------------------------------------------------------------
 
+AsyncSessionLocal = async_sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
 
-async def fetchrow(sql: str, *args):
-    async with pool.acquire() as conn:
-        return await conn.fetchrow(sql, *args)
+# -------------------------------------------------------------------
+# Base Model
+# -------------------------------------------------------------------
 
+Base = declarative_base()
 
-async def fetchval(sql: str, *args):
-    async with pool.acquire() as conn:
-        return await conn.fetchval(sql, *args)
-
-
-async def execute(sql: str, *args):
-    async with pool.acquire() as conn:
-        return await conn.execute(sql, *args)
-
-
-def row_to_dict(record):
-    if record is None:
-        return None
-    return dict(record)
-
-
-def rows_to_list(records):
-    return [dict(r) for r in records]
-
-from sqlalchemy.ext.asyncio import AsyncSession
-
-async def get_db() -> AsyncSession:
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+# -------------------------------------------------------------------
+# Dependency
+# -------------------------------------------------------------------
