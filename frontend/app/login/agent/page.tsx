@@ -24,21 +24,21 @@ export default function AgentLoginPage() {
 
     const res = await agentLogin(agentId.trim().toUpperCase(), password.trim());
 
-    if (res.error || !res.data?.access_token) {
-      setError(res.error || "Incorrect Agent ID or password. Please try again.");
+    const token = (res as any)?.access_token || res.data?.access_token;
+    const agentData = (res as any)?.agent_data || res.data?.agent_data;
+    
+    if (!token) {
+      setError("Incorrect Agent ID or password.");
       setLoading(false);
       return;
     }
-
+    
     await fetch("/api/auth/agent", {
-      method:  "POST",
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({
-        token:     res.data.access_token,
-        agentData: res.data.agent_data,
-      }),
+      body: JSON.stringify({ token, agentData }),
     });
-
+    
     router.push("/agent");
   }
 
