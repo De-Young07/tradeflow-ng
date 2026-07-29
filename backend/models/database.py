@@ -1,55 +1,81 @@
 """
-TradeFlow NG — SQLAlchemy Async Database
-Compatible with FastAPI Depends(get_db)
+TradeFlow NG — Async Database Pool (asyncpg + PostgreSQL/Supabase)
 """
 
 import os
+import asyncpg
 from typing import AsyncGenerator
 
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+pool: asyncpg.Pool | None = None
 
-from sqlalchemy.orm import declarative_base
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
-# -------------------------------------------------------------------
-# Database URL
-# -------------------------------------------------------------------
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+async def init_pool():
+    global pool
+    # Ensure correct URL scheme for asyncpg
+    dsn = (
+        DATABASE_URL.replace("postgres://", "postgresql://", 1)
+        if DATABASE_URL.startswith("postgres://")
+        else DATABASE_URL
+    )
+    pool = await asyncpg.create_pool(
+        dsn=dsn,
+        min_size=2,
+        max_size=10,
+        command_timeout=60,
+        ssl="require",  # Required for cloud databases like Render & Supabase
+    )
 
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL environment variable is not set.")
 
-# -------------------------------------------------------------------
-# Async Engine
-# -------------------------------------------------------------------
+async def close_pool():
+    global pool
+    if pool:
+        await pool.close()
 
-engine = create_async_engine(
-    DATABASE_URL,
-    echo=False,
-    future=True,
-    pool_pre_ping=True,
-)
 
-# -------------------------------------------------------------------
-# Session Factory
-# -------------------------------------------------------------------
+async def fetch(sql: str, *args):
+    if pool is None:
+        raise RuntimeError("Database pool is not initialized.")
+    async with pool.acquire() as conn:
+        return await conn.fetch(sql, *args)
 
-AsyncSessionLocal = async_sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
 
-# -------------------------------------------------------------------
-# Base Model
-# -------------------------------------------------------------------
+async def fetchrow(sql: str, *args):
+    if pool is None:
+        raise RuntimeError("Database pool is not initialized.")
+    async with pool.acquire() as conn:
+        return await conn.fetchrow(sql, *args)
 
-Base = declarative_base()
 
-# -------------------------------------------------------------------
-# Dependency
-# -------------------------------------------------------------------
+async def fetchval(sql: str, *args):
+    if pool is None:
+        raise RuntimeError("Database pool is not initialized.")
+    async with pool.acquire() as conn:
+        return await conn.fetchval(sql, *args)
+
+
+async def execute(sql: str, *args):
+    if pool is None:
+        raise RuntimeError("Database pool is not initialized.")
+    async with pool.acquire() as conn:
+        return await conn.execute(sql, *args)
+
+
+def row_to_dict(record):
+    if record is None:
+        return None
+    return dict(record)
+
+
+def rows_to_list(records):
+    return [dict(r) for r in records]
+
+
+# FastApi dependency yielding an asyncpg connection from the pool
+async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
+    if pool is None:
+        raise RuntimeError("Database pool is not initialized. Ensure lifespan calls init_pool().")
+    async with pool.acquire() as conn:
+        yield conn
+        
