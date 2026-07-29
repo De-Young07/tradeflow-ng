@@ -29,10 +29,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-ALLOWED_ORIGINS = os.environ.get(
-    "ALLOWED_ORIGINS",
-    "http://localhost:3000,https://app.tradeflowng.com"
-).split(",")
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "https://app.tradeflowng.com",
+    "https://tradeflowng.com",
+    "https://www.tradeflowng.com",
+    # Add your actual Vercel deployment URL:
+    "https://tradeflow-ng.vercel.app",        # ← your Vercel URL
+    "https://tradeflow-ng-git-main.vercel.app", # ← preview URL
+]
 
 app.add_middleware(
     CORSMiddleware,
