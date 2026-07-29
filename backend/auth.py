@@ -114,7 +114,7 @@ async def agent_login(body: AgentLoginRequest, db: AsyncSession = Depends(get_db
     aid = body.agent_id.strip().upper()
     pwd = body.password.strip()
 
-    result = await db.execute(text("""
+    row = await db.fetchrow("""
         SELECT a.id, a.full_name, a.agent_id, a.phone,
                a.state_id, a.market_id,
                s.name AS state_name,
@@ -122,12 +122,11 @@ async def agent_login(body: AgentLoginRequest, db: AsyncSession = Depends(get_db
         FROM   agents a
         LEFT JOIN states  s ON a.state_id  = s.id
         LEFT JOIN markets m ON a.market_id = m.id
-        WHERE  a.agent_id = :aid
-          AND  a.password  = :pwd
-          AND  a.is_active IS NOT FALSE
-    """), {"aid": aid, "pwd": pwd})
+        WHERE  a.agent_id = $1
+        AND  a.password  = $2
+        AND  a.is_active IS NOT FALSE
+    """, aid, pwd)
 
-    row = result.mappings().first()
     if not row:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
