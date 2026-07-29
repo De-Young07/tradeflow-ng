@@ -24,18 +24,23 @@ export default function AdminLoginPage() {
 
     const res = await adminLogin(username.trim(), password.trim());
 
-    if (res.error || !res.data?.access_token) {
-      setError(res.error || "Login failed. Please try again.");
+    const res = await adminLogin(username.trim(), password.trim());
+    
+    // Backend returns token directly, not wrapped in { data }
+    const token = (res as any)?.access_token || res.data?.access_token;
+    
+    if (!token) {
+      setError("Login failed. Please try again.");
       setLoading(false);
       return;
     }
-
+    
     await fetch("/api/auth/admin", {
-      method:  "POST",
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ token: res.data.access_token }),
+      body: JSON.stringify({ token }),
     });
-
+    
     router.push("/admin");
   }
 
