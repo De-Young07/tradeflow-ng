@@ -21,25 +21,31 @@ export default function AgentLoginPage() {
     }
     setLoading(true);
     setError("");
-
-    const res = await agentLogin(agentId.trim().toUpperCase(), password.trim());
-
-    const token = (res as any)?.access_token || res.data?.access_token;
-    const agentData = (res as any)?.agent_data || res.data?.agent_data;
-    
-    if (!token) {
-      setError("Incorrect Agent ID or password.");
+  
+    try {
+      const res = await agentLogin(agentId.trim().toUpperCase(), password.trim());
+  
+      const token     = (res as any)?.access_token;
+      const agentData = (res as any)?.agent_data;
+  
+      if (!token) {
+        setError((res as any)?.detail || "Incorrect Agent ID or password.");
+        setLoading(false);
+        return;
+      }
+  
+      await fetch("/api/auth/agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, agentData }),
+      });
+  
+      router.push("/agent");
+  
+    } catch (err) {
+      setError("Cannot connect to server. Please try again.");
       setLoading(false);
-      return;
     }
-    
-    await fetch("/api/auth/agent", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, agentData }),
-    });
-    
-    router.push("/agent");
   }
 
   return (
