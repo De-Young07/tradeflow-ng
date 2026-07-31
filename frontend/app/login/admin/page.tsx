@@ -13,37 +13,40 @@ export default function AdminLoginPage() {
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState("");
 
-  async function handleLogin(e: React.FormEvent) {
-    e.preventDefault();
-    if (!username || !password) {
-      setError("Please enter both username and password.");
-      return;
-    }
-    setLoading(true);
-    setError("");
+async function handleLogin(e: React.FormEvent) {
+  e.preventDefault();
+  if (!username || !password) {
+    setError("Please enter both username and password.");
+    return;
+  }
+  setLoading(true);
+  setError("");
 
+  try {
     const res = await adminLogin(username.trim(), password.trim());
 
-    const res = await adminLogin(username.trim(), password.trim());
-    
-    // Backend returns token directly, not wrapped in { data }
-    const token = (res as any)?.access_token || res.data?.access_token;
-    
+    // Backend returns token directly — no {data} wrapper
+    const token = (res as any)?.access_token;
+
     if (!token) {
-      setError("Login failed. Please try again.");
+      setError((res as any)?.detail || (res as any)?.error || "Login failed.");
       setLoading(false);
       return;
     }
-    
+
     await fetch("/api/auth/admin", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token }),
     });
-    
-    router.push("/admin");
-  }
 
+    router.push("/admin");
+
+  } catch (err) {
+    setError("Cannot connect to server. Please try again.");
+    setLoading(false);
+  }
+}
   return (
     <div
       className="min-h-screen flex items-center justify-center px-4"
