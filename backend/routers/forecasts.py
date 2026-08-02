@@ -2,8 +2,7 @@
 TradeFlow NG — Forecasts Router
 """
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
+import asyncpg
 from typing import Optional
 from models.database import get_db
 from auth import require_admin
@@ -15,7 +14,7 @@ router = APIRouter(dependencies=[Depends(require_admin)])
 async def get_forecasts(
     state: Optional[str] = None,
     commodity: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db),
 ):
     # Forecast data
     sql = """
@@ -28,17 +27,16 @@ async def get_forecasts(
         JOIN   commodities c ON f.commodity_id = c.id
         WHERE  f.generated_on = (SELECT MAX(generated_on) FROM forecasts)
     """
-    params = {}
+    params = []
     if state:
-        sql += " AND s.name = :state"
-        params["state"] = state
+        params.append(state)
+        sql += f" AND s.name = ${len(params)}"
     if commodity:
-        sql += " AND c.name = :commodity"
-        params["commodity"] = commodity
+        params.append(commodity)
+        sql += f" AND c.name = ${len(params)}"
     sql += " ORDER BY f.forecast_date"
 
-    fcast_res = await db.execute(text(sql), params)
-    forecast_rows = [dict(r) for r in fcast_res.mappings().all()]
+    forecast_rows = [dict(r) for r in await db.fetch(sql, *params)]
 
     # Historical data (last 56 days)
     hist_sql = """
@@ -51,17 +49,16 @@ async def get_forecasts(
         WHERE  cp.price_date >= CURRENT_DATE - INTERVAL '56 days'
           AND  cp.is_outlier IS NOT TRUE
     """
-    hist_params = {}
+    hist_params = []
     if state:
-        hist_sql += " AND s.name = :state"
-        hist_params["state"] = state
+        hist_params.append(state)
+        hist_sql += f" AND s.name = ${len(hist_params)}"
     if commodity:
-        hist_sql += " AND c.name = :commodity"
-        hist_params["commodity"] = commodity
+        hist_params.append(commodity)
+        hist_sql += f" AND c.name = ${len(hist_params)}"
     hist_sql += " GROUP BY cp.price_date, s.name, c.name ORDER BY cp.price_date"
 
-    hist_res = await db.execute(text(hist_sql), hist_params)
-    hist_rows = [dict(r) for r in hist_res.mappings().all()]
+    hist_rows = [dict(r) for r in await db.fetch(hist_sql, *hist_params)]
 
     # Summary stats
     if forecast_rows:
@@ -89,16 +86,16 @@ async def get_forecasts(
 
 
 @router.get("/states")
-async def forecast_states(db: AsyncSession = Depends(get_db)):
-    res = await db.execute(text(
+async def forecast_states(db: asyncpg.Connection = Depends(get_db)):
+    rows = await db.fetch(
         "SELECT DISTINCT s.name FROM forecasts f JOIN states s ON f.state_id=s.id ORDER BY s.name"
-    ))
-    return {"data": [r[0] for r in res.all()], "status": "ok"}
+    )
+    return {"data": [r["name"] for r in rows], "status": "ok"}
 
 
 @router.get("/commodities")
-async def forecast_commodities(db: AsyncSession = Depends(get_db)):
-    res = await db.execute(text(
+async def forecast_commodities(db: asyncpg.Connection = Depends(get_db)):
+    rows = await db.fetch(
         "SELECT DISTINCT c.name FROM forecasts f JOIN commodities c ON f.commodity_id=c.id ORDER BY c.name"
-    ))
-    return {"data": [r[0] for r in res.all()], "status": "ok"}
+    )
+    return {"data": [r["name"] for r in rows], "status": "ok"}

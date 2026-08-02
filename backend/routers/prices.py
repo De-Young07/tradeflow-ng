@@ -2,15 +2,14 @@
 TradeFlow NG — Prices Router (public endpoint)
 """
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
+import asyncpg
 from models.database import get_db
 
 router = APIRouter()
 
 @router.get("/latest")
-async def latest_prices(db: AsyncSession = Depends(get_db)):
-    res = await db.execute(text("""
+async def latest_prices(db: asyncpg.Connection = Depends(get_db)):
+    rows = await db.fetch("""
         SELECT s.name AS state, c.name AS commodity,
                cp.price_per_unit AS price, cp.price_date,
                m.name AS market
@@ -26,6 +25,5 @@ async def latest_prices(db: AsyncSession = Depends(get_db)):
         )
         AND cp.is_outlier IS NOT TRUE
         ORDER BY c.name, s.name
-    """))
-    rows = [dict(r) for r in res.mappings().all()]
-    return {"data": rows, "status": "ok", "error": None}
+    """)
+    return {"data": [dict(r) for r in rows], "status": "ok", "error": None}

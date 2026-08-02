@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { adminLogin } from "@/lib/api";
+import { saveAdminToken } from "@/lib/auth";
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -33,6 +34,10 @@ async function handleLogin(e: React.FormEvent) {
       setLoading(false);
       return;
     }
+
+    // Save token to sessionStorage so API calls can send it as a Bearer token.
+    // (The cookie set below is only used by middleware for route protection.)
+    saveAdminToken(token);
 
     await fetch("/api/auth/admin", {
       method: "POST",
