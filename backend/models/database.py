@@ -25,6 +25,11 @@ async def init_pool():
         max_size=10,
         command_timeout=60,
         ssl="require",  # Required for cloud databases like Render & Supabase
+        # Supabase's pooler (port 6543) runs pgbouncer in transaction mode,
+        # which does not support prepared statements. Disable the statement
+        # cache so asyncpg never issues named PREPARE calls. Safe for direct
+        # (session-mode, port 5432) connections too.
+        statement_cache_size=0,
     )
 
 

@@ -7,7 +7,7 @@ import time
 import sys
 import os
 from fastapi import APIRouter, Depends, BackgroundTasks
-from sqlalchemy.ext.asyncio import AsyncSession
+import asyncpg
 from models.database import get_db
 from models.schemas import PipelineResult
 from auth import require_admin
@@ -124,14 +124,12 @@ async def run_optimization_only(background_tasks: BackgroundTasks):
 
 
 @router.get("/logs")
-async def pipeline_logs(db: AsyncSession = Depends(get_db)):
-    from sqlalchemy import text
-    res = await db.execute(text("""
+async def pipeline_logs(db: asyncpg.Connection = Depends(get_db)):
+    rows = await db.fetch("""
         SELECT id, run_type, status, records_in, records_out,
                error_message, duration_secs, run_at
         FROM   pipeline_logs
         ORDER BY run_at DESC
         LIMIT 50
-    """))
-    rows = [dict(r) for r in res.mappings().all()]
-    return {"data": rows, "status": "ok"}
+    """)
+    return {"data": [dict(r) for r in rows], "status": "ok"}

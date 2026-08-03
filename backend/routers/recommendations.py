@@ -2,8 +2,7 @@
 TradeFlow NG — Recommendations Router (public summary)
 """
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
+import asyncpg
 from models.database import get_db
 from auth import require_admin
 
@@ -11,8 +10,8 @@ router = APIRouter(dependencies=[Depends(require_admin)])
 
 
 @router.get("/summary")
-async def recommendations_summary(db: AsyncSession = Depends(get_db)):
-    res = await db.execute(text("""
+async def recommendations_summary(db: asyncpg.Connection = Depends(get_db)):
+    row = await db.fetchrow("""
         SELECT COUNT(*) AS total,
                SUM(expected_profit_ngn) AS total_profit,
                AVG(profit_margin_pct)   AS avg_margin,
@@ -20,6 +19,5 @@ async def recommendations_summary(db: AsyncSession = Depends(get_db)):
                SUM(CASE WHEN is_shock_flagged IS NOT FALSE AND is_shock_flagged THEN 1 ELSE 0 END) AS shocks
         FROM optimization_recommendations
         WHERE run_id = (SELECT MAX(id) FROM optimization_runs)
-    """))
-    row = dict(res.mappings().first() or {})
-    return {"data": row, "status": "ok"}
+    """)
+    return {"data": dict(row) if row else {}, "status": "ok"}

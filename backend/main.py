@@ -8,6 +8,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import os
 
+# Load environment variables from a .env file for local development.
+# On hosted platforms (Render, Railway) env vars are injected directly, so the
+# .env file is simply absent and load_dotenv() is a harmless no-op.
+from dotenv import load_dotenv
+# .env lives at the repo root (one level up from backend/). Fall back to CWD.
+_ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+load_dotenv(_ENV_PATH)
+load_dotenv()  # also pick up a .env in the current working directory, if present
+
 from routers import admin, agents, prices, forecasts, recommendations, pipeline
 from auth import router as auth_router
 

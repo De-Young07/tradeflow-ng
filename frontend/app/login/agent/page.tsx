@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { agentLogin } from "@/lib/api";
+import { saveAgentToken } from "@/lib/auth";
 
 export default function AgentLoginPage() {
   const router = useRouter();
@@ -33,7 +34,11 @@ export default function AgentLoginPage() {
         setLoading(false);
         return;
       }
-  
+
+      // Save token + profile to sessionStorage so API calls can send the Bearer
+      // token. (The cookie set below is only used by middleware for route protection.)
+      saveAgentToken(token, agentData ?? {});
+
       await fetch("/api/auth/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
