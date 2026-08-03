@@ -1,4 +1,5 @@
-"""
+  
+  """
 TradeFlow NG — Pipeline Router
 Triggers cleaning → forecasting → optimization from API.
 """
@@ -22,6 +23,7 @@ if os.path.exists(SRC_DIR) and SRC_DIR not in sys.path:
 
 def _run_pipeline_sync() -> dict:
     """Run the full ML pipeline synchronously in a background thread."""
+     
     start = time.time()
     result = {
         "records_cleaned": 0,

@@ -11,14 +11,14 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from pydantic import BaseModel
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.database import get_db
+from security import verify_password
 
 router   = APIRouter()
 security = HTTPBearer()
@@ -110,12 +110,14 @@ async def admin_login(body: AdminLoginRequest):
 # Full path: POST /auth/agent/login  (prefix /auth + this route /agent/login)
 # NOTE: was incorrectly /auth/agent/login causing double-prefix → /auth/auth/agent/login
 @router.post("/agent/login", response_model=AgentTokenResponse)
-async def agent_login(body: AgentLoginRequest, db: AsyncSession = Depends(get_db)):
+async def agent_login(body: AgentLoginRequest, db: asyncpg.Connection = Depends(get_db)):
     aid = body.agent_id.strip().upper()
     pwd = body.password.strip()
 
+    # Fetch by agent_id only, then verify the password in Python. This supports
+    # both bcrypt-hashed and legacy plaintext passwords during migration.
     row = await db.fetchrow("""
-        SELECT a.id, a.full_name, a.agent_id, a.phone,
+        SELECT a.id, a.full_name, a.agent_id, a.phone, a.password,
                a.state_id, a.market_id,
                s.name AS state_name,
                m.name AS market_name
@@ -123,11 +125,10 @@ async def agent_login(body: AgentLoginRequest, db: AsyncSession = Depends(get_db
         LEFT JOIN states  s ON a.state_id  = s.id
         LEFT JOIN markets m ON a.market_id = m.id
         WHERE  a.agent_id = $1
-        AND  a.password  = $2
         AND  a.is_active IS NOT FALSE
-    """, aid, pwd)
+    """, aid)
 
-    if not row:
+    if not row or not verify_password(pwd, row["password"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect Agent ID or password",
