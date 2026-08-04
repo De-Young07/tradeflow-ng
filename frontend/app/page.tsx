@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { agentLogin } from "@/lib/api";
+import { saveAgentToken } from "@/lib/auth";
 
 export default function AgentLoginPage() {
   const router = useRouter();
@@ -24,18 +25,24 @@ export default function AgentLoginPage() {
 
     const res = await agentLogin(agentId.trim().toUpperCase(), password.trim());
 
-    if (res.error || !res.data?.access_token) {
+    const token     = res.access_token;
+    const agentData = res.agent_data;
+
+    if (res.error || !token) {
       setError(res.error || "Incorrect Agent ID or password.");
       setLoading(false);
       return;
     }
 
+    // Persist token so API calls can send it as a Bearer token.
+    saveAgentToken(token, agentData ?? {});
+
     await fetch("/api/auth/agent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        token: res.data.access_token,
-        agentData: res.data.agent_data,
+        token,
+        agentData,
       }),
     });
 

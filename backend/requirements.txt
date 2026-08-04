@@ -11,6 +11,9 @@ uvloop==0.19.0
 # ── Auth & security ───────────────────────────────────────────
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+# security.py imports bcrypt directly; pin it explicitly rather than relying
+# on passlib's transitive dependency.
+bcrypt>=4.0.0
 python-multipart==0.0.9
 cryptography>=42.0.0
 
