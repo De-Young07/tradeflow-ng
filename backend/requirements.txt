@@ -42,3 +42,5 @@ python-dotenv==1.0.1
 
 # ── Performance ───────────────────────────────────────────────
 orjson==3.10.3        # faster JSON serialisation in FastAPI
+
+starlette<0.41.0
