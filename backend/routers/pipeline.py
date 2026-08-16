@@ -1,5 +1,4 @@
-  
-  """
+"""
 TradeFlow NG — Pipeline Router
 Triggers cleaning → forecasting → optimization from API.
 """

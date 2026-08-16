@@ -17,7 +17,7 @@ _ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 load_dotenv(_ENV_PATH)
 load_dotenv()  # also pick up a .env in the current working directory, if present
 
-from routers import admin, agents, prices, forecasts, recommendations, pipeline
+from routers import admin, agents, prices, forecasts, recommendations, pipeline, kobo
 from auth import router as auth_router
 
 
@@ -63,6 +63,7 @@ app.include_router(prices.router,          prefix="/prices",         tags=["Pric
 app.include_router(forecasts.router,       prefix="/forecasts",      tags=["Forecasts"])
 app.include_router(recommendations.router, prefix="/recommendations", tags=["Recommendations"])
 app.include_router(pipeline.router,        prefix="/pipeline",       tags=["Pipeline"])
+app.include_router(kobo.router,            prefix="/kobo",           tags=["KoBo"])
 
 
 @app.get("/health")

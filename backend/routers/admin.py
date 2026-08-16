@@ -1,4 +1,4 @@
-﻿"""
+"""
 TradeFlow NG — Admin Router
 All admin-only endpoints.
 """
@@ -20,9 +20,8 @@ router = APIRouter(dependencies=[Depends(require_admin)])
 
 # ── Overview ─────────────────────────────────────────────────
 @router.get("/overview")
-async def get_overview(db: AsyncSession = Depends(get_db)):
-    # Latest optimization run stats
-    opt = await db.execute(text("""
+async def get_overview(db: asyncpg.Connection = Depends(get_db)):
+    opt_row = await db.fetchrow("""
         SELECT
             SUM(r.expected_profit_ngn)  AS total_profit,
             COUNT(*)                    AS n_recommendations,
@@ -31,31 +30,21 @@ async def get_overview(db: AsyncSession = Depends(get_db)):
             SUM(CASE WHEN r.is_shock_flagged IS NOT FALSE AND r.is_shock_flagged THEN 1 ELSE 0 END) AS n_shocks
         FROM optimization_recommendations r
         WHERE r.run_id = (SELECT MAX(id) FROM optimization_runs)
-    """))
-    opt_row = opt.mappings().first() or {}
+    """) or {}
 
-    # Agent count
-    agents_res = await db.execute(text(
-        "SELECT COUNT(*) AS n FROM agents WHERE is_active IS NOT FALSE"
-    ))
-    n_agents = (agents_res.mappings().first() or {}).get("n", 0)
+    n_agents = await db.fetchval(
+        "SELECT COUNT(*) FROM agents WHERE is_active IS NOT FALSE"
+    ) or 0
 
-    # Price records
-    prices_res = await db.execute(text(
-        "SELECT COUNT(*) AS n FROM cleaned_prices"
-    ))
-    n_prices = (prices_res.mappings().first() or {}).get("n", 0)
+    n_prices = await db.fetchval("SELECT COUNT(*) FROM cleaned_prices") or 0
 
-    # Last forecast and optimization dates
-    dates_res = await db.execute(text("""
+    dates_row = await db.fetchrow("""
         SELECT
-            (SELECT MAX(generated_on) FROM forecasts)     AS last_forecast,
+            (SELECT MAX(generated_on) FROM forecasts)         AS last_forecast,
             (SELECT MAX(run_date)     FROM optimization_runs) AS last_opt
-    """))
-    dates_row = dates_res.mappings().first() or {}
+    """) or {}
 
-    # Pipeline logs (last 20)
-    logs_res = await db.execute(text("""
+    logs = [dict(r) for r in await db.fetch("""
         SELECT id, run_type, status, records_in, records_out,
                error_message, duration_secs, run_at
         FROM   pipeline_logs
@@ -65,16 +54,16 @@ async def get_overview(db: AsyncSession = Depends(get_db)):
 
     return {
         "data": {
-            "total_profit":          float(opt_row.get("total_profit") or 0),
-            "n_recommendations":     int(opt_row.get("n_recommendations") or 0),
-            "avg_margin":            round(float(opt_row.get("avg_margin") or 0), 1),
-            "n_backhauls":           int(opt_row.get("n_backhauls") or 0),
-            "n_shock_flags":         int(opt_row.get("n_shocks") or 0),
-            "n_agents":              int(n_agents),
-            "n_price_records":       int(n_prices),
-            "last_forecast_date":    str(dates_row.get("last_forecast") or ""),
-            "last_optimization_date":str(dates_row.get("last_opt") or ""),
-            "pipeline_logs":         logs,
+            "total_profit":           float(opt_row.get("total_profit") or 0),
+            "n_recommendations":      int(opt_row.get("n_recommendations") or 0),
+            "avg_margin":             round(float(opt_row.get("avg_margin") or 0), 1),
+            "n_backhauls":            int(opt_row.get("n_backhauls") or 0),
+            "n_shock_flags":          int(opt_row.get("n_shocks") or 0),
+            "n_agents":               int(n_agents),
+            "n_price_records":        int(n_prices),
+            "last_forecast_date":     str(dates_row.get("last_forecast") or ""),
+            "last_optimization_date": str(dates_row.get("last_opt") or ""),
+            "pipeline_logs":          logs,
         },
         "status": "ok",
         "error": None,
@@ -114,7 +103,6 @@ async def get_recommendations(
         JOIN   states sd ON co.dest_state_id   = sd.id
         WHERE  r.run_id = $1
     """
-
     if commodity:
         params.append(commodity)
         sql += f" AND c.name = ${len(params)}"
@@ -122,7 +110,6 @@ async def get_recommendations(
         sql += " AND r.is_shock_flagged IS NOT FALSE AND r.is_shock_flagged"
     if backhaul_only:
         sql += " AND r.is_backhaul IS NOT FALSE AND r.is_backhaul"
-
     sql += " ORDER BY r.expected_profit_ngn DESC"
 
     rows = [dict(r) for r in await db.fetch(sql, *params)]
@@ -144,14 +131,13 @@ async def list_agents(db: asyncpg.Connection = Depends(get_db)):
         GROUP BY a.id, a.full_name, a.agent_id, a.phone,
                  s.name, m.name, a.is_active
         ORDER BY a.agent_id
-    """")
+    """)
     return {"data": [dict(r) for r in rows], "status": "ok", "error": None}
 
 
 @router.post("/agents")
 async def create_agent(body: CreateAgentRequest, db: asyncpg.Connection = Depends(get_db)):
     aid = body.agent_id.strip().upper()
-    # Check duplicate agent_id
     exists = await db.fetchval("SELECT id FROM agents WHERE agent_id = $1", aid)
     if exists:
         raise HTTPException(status_code=409, detail="Agent ID already exists")
@@ -172,26 +158,25 @@ async def price_trend(
     days: int = 56,
     db: asyncpg.Connection = Depends(get_db),
 ):
-    res = await db.execute(text("""
+    rows = await db.fetch("""
         SELECT s.name AS state, cp.price_date AS date,
                AVG(cp.price_per_unit) AS price
         FROM   cleaned_prices cp
         JOIN   states      s ON cp.state_id     = s.id
         JOIN   commodities c ON cp.commodity_id = c.id
         WHERE  c.name = $1
-          AND  cp.price_date >= CURRENT_DATE - (INTERVAL '1 day' * {int(days)})
+          AND  cp.price_date >= CURRENT_DATE - ($2::int * INTERVAL '1 day')
           AND  cp.is_outlier IS NOT TRUE
         GROUP BY s.name, cp.price_date
         ORDER BY cp.price_date, s.name
-    """), {"commodity": commodity, "days": days})
-    rows = [dict(r) for r in res.mappings().all()]
-    return {"data": rows, "status": "ok", "error": None}
+    """, commodity, days)
+    return {"data": [dict(r) for r in rows], "status": "ok", "error": None}
 
 
 # ── Tableau / profit matrix ───────────────────────────────────
 @router.get("/tableau")
-async def get_tableau(commodity: str = "Yam", db: AsyncSession = Depends(get_db)):
-    res = await db.execute(text("""
+async def get_tableau(commodity: str = "Yam", db: asyncpg.Connection = Depends(get_db)):
+    rows = await db.fetch("""
         SELECT so.name AS origin,
                sd.name AS destination,
                c.name  AS commodity,
@@ -204,29 +189,26 @@ async def get_tableau(commodity: str = "Yam", db: AsyncSession = Depends(get_db)
         JOIN   states   sd  ON co.dest_state_id   = sd.id
         JOIN   commodities c ON r.commodity_id   = c.id
         WHERE  r.run_id = (SELECT MAX(id) FROM optimization_runs)
-          AND  c.name   = :commodity
+          AND  c.name   = $1
         ORDER BY profit_per_unit DESC
-    """), {"commodity": commodity})
-    rows = [dict(r) for r in res.mappings().all()]
-    return {"data": rows, "status": "ok", "error": None}
+    """, commodity)
+    return {"data": [dict(r) for r in rows], "status": "ok", "error": None}
 
 
 # ── Feedback ──────────────────────────────────────────────────
 @router.post("/feedback")
-async def log_feedback(body: FeedbackRequest, db: AsyncSession = Depends(get_db)):
-    # Get corridor and commodity from recommendation
-    rec = await db.execute(text("""
+async def log_feedback(body: FeedbackRequest, db: asyncpg.Connection = Depends(get_db)):
+    row = await db.fetchrow("""
         SELECT r.corridor_id, r.commodity_id,
                co.dest_state_id AS state_id
         FROM   optimization_recommendations r
         JOIN   corridors co ON r.corridor_id = co.id
-        WHERE  r.id = :id
-    """), {"id": body.recommendation_id})
-    row = rec.mappings().first()
+        WHERE  r.id = $1
+    """, body.recommendation_id)
     if not row:
         raise HTTPException(status_code=404, detail="Recommendation not found")
 
-    await db.execute(text("""
+    await db.execute("""
         INSERT INTO actual_outcomes
             (recommendation_id, state_id, commodity_id,
              actual_buy_price, actual_sell_price,
@@ -242,7 +224,7 @@ async def log_feedback(body: FeedbackRequest, db: AsyncSession = Depends(get_db)
 
 # ── Database inspector ───────────────────────────────────────
 @router.get("/db/stats")
-async def db_stats(db: AsyncSession = Depends(get_db)):
+async def db_stats(db: asyncpg.Connection = Depends(get_db)):
     tables = [
         "states", "markets", "commodities", "agents",
         "raw_submissions", "cleaned_prices", "forecasts",
@@ -252,8 +234,7 @@ async def db_stats(db: AsyncSession = Depends(get_db)):
     counts = {}
     for table in tables:
         try:
-            res = await db.execute(text(f"SELECT COUNT(*) AS n FROM {table}"))
-            counts[table] = int((res.mappings().first() or {}).get("n", 0))
+            counts[table] = int(await db.fetchval(f"SELECT COUNT(*) FROM {table}") or 0)
         except Exception:
             counts[table] = -1
     return {"data": counts, "status": "ok", "error": None}
