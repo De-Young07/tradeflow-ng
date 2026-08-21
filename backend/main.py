@@ -40,9 +40,14 @@ app = FastAPI(
 
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
+    # Static marketing site — local preview during development
+    "http://localhost:4599",
+    "http://127.0.0.1:4599",
     "https://app.tradeflowng.com",
     "https://tradeflowng.com",
     "https://www.tradeflowng.com",
+    # GitHub Pages host for the marketing site repo (De-Young07/TradeFlow-NG-website-)
+    "https://de-young07.github.io",
     # Add your actual Vercel deployment URL:
     "https://tradeflow-ng.vercel.app",        # ← your Vercel URL
     "https://tradeflow-ng-git-main.vercel.app", # ← preview URL
