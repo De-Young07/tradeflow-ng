@@ -28,6 +28,10 @@ pandas==2.2.2
 numpy==1.26.4
 # Prophet requires pystan — using the pre-built wheel
 prophet==1.1.5
+# Pin cmdstanpy < 1.3.0: cmdstanpy 1.3.0's stricter set_cmdstan_path rejects
+# Prophet 1.1.5's bundled precompiled cmdstan, so every model fit fails with
+# "'Prophet' object has no attribute 'stan_backend'" and 0 forecasts are written.
+cmdstanpy==1.2.4
 # PuLP for linear programming optimization
 pulp==2.8.0
 
