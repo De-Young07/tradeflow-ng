@@ -6,7 +6,7 @@ All DB access goes through db_adapter — no direct conn.execute calls.
 
 import pandas as pd
 import numpy as np
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 import warnings
 warnings.filterwarnings("ignore")
 import os
@@ -32,6 +32,61 @@ INCOMPATIBLE_PAIRS = {
     (DURABLE,    PERISHABLE),
 }
 
+# ── Staleness / freshness ──────────────────────────────────
+# Forecasts whose training data was too old are marked STALE_TRAINING by the
+# forecasting stage. When SUPPRESS_STALE_RECS is on, routes built on such
+# forecasts are dropped from the recommendation set (never optimized/saved).
+SUPPRESS_STALE_RECS = True
+STALE_MARKER        = "STALE_TRAINING"   # keep in sync with forecasting.STALE_MARKER
+FORECAST_FRESH_DAYS = 2                   # warn if the latest forecast batch is older
+
+# ── Interim transport-cost estimate ────────────────────────
+# Used ONLY when transport_costs has no valid row for a route. Real cost rows
+# always take precedence, so once the table is populated this is bypassed with
+# no code change. The per-vehicle-km rate is a placeholder — tune it.
+TRANSPORT_COST_NGN_PER_KM       = 300.0   # ₦ per vehicle-km
+DEFAULT_ESTIMATE_CAPACITY_UNITS = 30      # fallback if vehicle_types is unavailable
+DEFAULT_ESTIMATE_CAPACITY_KG    = 3000
+
+
+def _utc_today():
+    """Canonical pipeline date (UTC) so reads line up with forecasting writes."""
+    return datetime.now(timezone.utc).date()
+
+
+def pick_estimate_vehicle(vehicle_types):
+    """Choose the vehicle assumed for interim distance-based transport
+    estimates. Prefers a mid-size 'Medium' truck; falls back to the row whose
+    capacity is closest to the default, then to module constants. Avoids
+    hard-coding a vehicle_type id that may differ in the live DB."""
+    fallback = {
+        "id": None,
+        "capacity_units": DEFAULT_ESTIMATE_CAPACITY_UNITS,
+        "capacity_kg": DEFAULT_ESTIMATE_CAPACITY_KG,
+        "name": "estimate",
+    }
+    if vehicle_types is None or vehicle_types.empty:
+        return fallback
+    vt = vehicle_types.copy()
+    med = (vt[vt["name"].str.contains("Medium", case=False, na=False)]
+           if "name" in vt.columns else vt.iloc[0:0])
+    if not med.empty:
+        r = med.iloc[0]
+    elif "capacity_kg" in vt.columns:
+        vt["_d"] = (pd.to_numeric(vt["capacity_kg"], errors="coerce")
+                    - DEFAULT_ESTIMATE_CAPACITY_KG).abs()
+        r = vt.sort_values("_d").iloc[0]
+    else:
+        return fallback
+    cu = r.get("capacity_units")
+    ck = r.get("capacity_kg")
+    return {
+        "id": int(r["id"]) if pd.notna(r.get("id")) else None,
+        "capacity_units": float(cu) if pd.notna(cu) and cu else DEFAULT_ESTIMATE_CAPACITY_UNITS,
+        "capacity_kg": float(ck) if pd.notna(ck) and ck else DEFAULT_ESTIMATE_CAPACITY_KG,
+        "name": r["name"] if "name" in r and pd.notna(r.get("name")) else "estimate",
+    }
+
 
 # ═══════════════════════════════════════════════════════════
 # 1. DATA LOADERS — all via db_adapter
@@ -39,7 +94,11 @@ INCOMPATIBLE_PAIRS = {
 
 def load_forecasts(forecast_date=None):
     if forecast_date is None:
-        forecast_date = str(date.today() + timedelta(days=1))
+        forecast_date = str(_utc_today() + timedelta(days=1))
+    # Use the LATEST generated batch for the target date rather than
+    # `generated_on = CURRENT_DATE`. That equality broke whenever the writer's
+    # local date (WAT) disagreed with the server's UTC date, hiding a fresh
+    # batch entirely. MAX(generated_on) is timezone-proof.
     df = db_query("""
         SELECT f.state_id, f.commodity_id,
                s.name               AS state_name,
@@ -51,15 +110,28 @@ def load_forecasts(forecast_date=None):
                f.lower_bound,
                f.upper_bound,
                f.is_shock_flagged,
-               f.shock_reason
+               f.shock_reason,
+               f.generated_on
         FROM   forecasts    f
         JOIN   states       s ON f.state_id     = s.id
         JOIN   commodities  c ON f.commodity_id = c.id
         WHERE  f.forecast_date = ?
-          AND  f.generated_on  = CURRENT_DATE
+          AND  f.generated_on  = (
+                   SELECT MAX(f2.generated_on)
+                   FROM   forecasts f2
+                   WHERE  f2.forecast_date = ?
+               )
         ORDER BY c.name, s.name
-    """, (forecast_date,))
+    """, (forecast_date, forecast_date))
     print(f"  Loaded {len(df)} forecasts for {forecast_date}.")
+
+    # Freshness guard — warn (don't block) if the batch is old.
+    if not df.empty and "generated_on" in df.columns:
+        batch = pd.to_datetime(df["generated_on"]).max().date()
+        age   = (_utc_today() - batch).days
+        if age > FORECAST_FRESH_DAYS:
+            print(f"  ⚠ Latest forecast batch is {age}d old "
+                  f"(generated {batch}); recommendations may be outdated.")
     return df
 
 
@@ -115,8 +187,8 @@ def load_transport_costs():
                vt.name AS vehicle_name
         FROM   transport_costs tc
         LEFT JOIN vehicle_types vt ON tc.vehicle_type_id = vt.id
-        WHERE  tc.expiry_date IS NULL
-           OR  tc.expiry_date >= CURRENT_DATE
+        WHERE  (tc.expiry_date IS NULL OR tc.expiry_date >= CURRENT_DATE)
+          AND  tc.effective_date <= CURRENT_DATE
         ORDER BY tc.effective_date DESC
     """)
     df = df.drop_duplicates(subset=["corridor_id", "commodity_id"], keep="first")
@@ -132,9 +204,18 @@ def load_vehicle_types():
 # 2. BUILD PROFIT MATRIX
 # ═══════════════════════════════════════════════════════════
 
-def build_profit_matrix(forecasts, supply_prices, corridors, transport_costs):
+def build_profit_matrix(forecasts, supply_prices, corridors, transport_costs,
+                        est_vehicle=None):
+    if est_vehicle is None:
+        est_vehicle = {
+            "id": None,
+            "capacity_units": DEFAULT_ESTIMATE_CAPACITY_UNITS,
+            "capacity_kg": DEFAULT_ESTIMATE_CAPACITY_KG,
+            "name": "estimate",
+        }
     rows = []
     missing_cost_warnings = []
+    stale_suppressed = 0
 
     for _, corridor in corridors.iterrows():
         origin_id   = corridor["origin_state_id"]
@@ -164,23 +245,39 @@ def build_profit_matrix(forecasts, supply_prices, corridors, transport_costs):
             is_shock      = bool(forecast_row["is_shock_flagged"])
             shock_reason  = forecast_row["shock_reason"]
 
+            # Suppress recs built on stale forecasts (user policy). The
+            # forecasting stage prefixes shock_reason with STALE_TRAINING.
+            is_stale = bool(shock_reason) and str(shock_reason).startswith(STALE_MARKER)
+            if SUPPRESS_STALE_RECS and is_stale:
+                stale_suppressed += 1
+                continue
+
             cost_row = transport_costs[
                 (transport_costs["corridor_id"]  == corridor_id) &
                 (transport_costs["commodity_id"] == commodity_id)
             ]
 
             if cost_row.empty:
-                transport_cost    = 0.0
+                # No real cost yet → interim distance-based estimate (flagged).
+                # Trip cost spread across the assumed vehicle's unit capacity.
+                distance_km       = float(corridor["distance_km"] or 0)
+                cap_units         = est_vehicle["capacity_units"] or DEFAULT_ESTIMATE_CAPACITY_UNITS
+                trip_cost         = distance_km * TRANSPORT_COST_NGN_PER_KM
+                transport_cost    = (trip_cost / cap_units) if cap_units else 0.0
                 missing_cost_flag = True
-                vehicle_capacity  = 3000
+                vehicle_type_id   = est_vehicle["id"]
+                vehicle_capacity  = est_vehicle["capacity_kg"] or DEFAULT_ESTIMATE_CAPACITY_KG
                 missing_cost_warnings.append(
-                    f"{commodity_name}: {origin_name} → {dest_name}"
+                    f"{commodity_name}: {origin_name} → {dest_name} "
+                    f"(est ₦{transport_cost:,.0f}/unit @ {distance_km:.0f}km)"
                 )
             else:
                 transport_cost    = float(cost_row.iloc[0]["cost_per_unit"])
                 missing_cost_flag = False
+                vt_id             = cost_row.iloc[0]["vehicle_type_id"]
+                vehicle_type_id   = int(vt_id) if pd.notna(vt_id) else None
                 cap               = cost_row.iloc[0]["capacity_kg"]
-                vehicle_capacity  = float(cap) if cap else 3000
+                vehicle_capacity  = float(cap) if cap else DEFAULT_ESTIMATE_CAPACITY_KG
 
             profit_per_unit = sell_price - buy_price - transport_cost
             margin_pct      = (
@@ -202,6 +299,7 @@ def build_profit_matrix(forecasts, supply_prices, corridors, transport_costs):
                 "buy_price":           buy_price,
                 "sell_price":          sell_price,
                 "transport_cost":      transport_cost,
+                "vehicle_type_id":     vehicle_type_id,
                 "profit_per_unit":     profit_per_unit,
                 "margin_pct":          margin_pct,
                 "objective_score":     objective_score,
@@ -214,15 +312,20 @@ def build_profit_matrix(forecasts, supply_prices, corridors, transport_costs):
 
     matrix = pd.DataFrame(rows)
 
+    if stale_suppressed:
+        print(f"  ⓘ Suppressed {stale_suppressed} route(s) built on stale "
+              f"forecasts (SUPPRESS_STALE_RECS=on).")
+
     if missing_cost_warnings:
-        print(f"\n  ⚠ Missing transport costs ({len(missing_cost_warnings)} routes):")
+        print(f"\n  ⚠ Estimated transport for {len(missing_cost_warnings)} route(s) "
+              f"(no real cost yet — auto-switches when transport_costs is loaded):")
         for w in missing_cost_warnings[:5]:
             print(f"    - {w}")
         if len(missing_cost_warnings) > 5:
             print(f"    ... and {len(missing_cost_warnings)-5} more.")
 
     print(f"  Built profit matrix: {len(matrix)} route-commodity combinations.")
-    return matrix
+    return matrix, stale_suppressed
 
 
 # ═══════════════════════════════════════════════════════════
@@ -335,15 +438,19 @@ def extract_recommendations(prob, Q, viable, run_id):
             continue
         row    = viable.loc[idx]
         profit = quantity * row["profit_per_unit"]
+        qty_kg = quantity * float(row.get("avg_weight_kg") or 0)
+        vt_id  = row.get("vehicle_type_id")
         recommendations.append({
             "run_id":               run_id,
             "corridor_id":          int(row["corridor_id"]),
             "commodity_id":         int(row["commodity_id"]),
+            "vehicle_type_id":      (int(vt_id) if pd.notna(vt_id) else None),
             "origin":               row["origin_name"],
             "destination":          row["dest_name"],
             "commodity":            row["commodity_name"],
             "perishability":        row["perishability"],
             "recommended_quantity": round(quantity, 2),
+            "recommended_quantity_kg": round(qty_kg, 2),
             "buy_price":            round(row["buy_price"], 2),
             "sell_price":           round(row["sell_price"], 2),
             "transport_cost":       round(row["transport_cost"], 2),
@@ -406,7 +513,7 @@ def save_optimization_run(total_profit, status, week_start, week_end):
         INSERT INTO optimization_runs
             (run_date, week_start, week_end, solver_status, total_profit_ngn)
         VALUES (?, ?, ?, ?, ?)
-    """, (str(date.today()), str(week_start), str(week_end),
+    """, (str(_utc_today()), str(week_start), str(week_end),
           status, round(float(total_profit), 2)))
 
     # Retrieve the last inserted ID
@@ -422,24 +529,31 @@ def save_recommendations(recommendations, run_id):
     inserted = 0
     for _, row in recommendations.iterrows():
         try:
+            vt_id = row.get("vehicle_type_id")
             db_execute("""
                 INSERT INTO optimization_recommendations (
-                    run_id, corridor_id, commodity_id,
-                    recommended_quantity,
+                    run_id, corridor_id, commodity_id, vehicle_type_id,
+                    recommended_quantity, recommended_quantity_kg,
                     buy_price, sell_price, transport_cost,
                     expected_profit_ngn, profit_margin_pct,
+                    is_shock_flagged, missing_cost_flag, shock_reason,
                     is_backhaul, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 run_id,
                 int(row["corridor_id"]),
                 int(row["commodity_id"]),
+                (int(vt_id) if pd.notna(vt_id) else None),
                 float(row["recommended_quantity"]),
+                float(row.get("recommended_quantity_kg") or 0),
                 float(row["buy_price"]),
                 float(row["sell_price"]),
                 float(row["transport_cost"]),
                 float(row["expected_profit_ngn"]),
                 float(row["profit_margin_pct"]),
+                bool(row["is_shock_flagged"]),
+                bool(row["missing_cost_flag"]),
+                row.get("shock_reason"),
                 bool(row["is_backhaul"]),
                 "Pending",
             ))
@@ -479,14 +593,14 @@ def print_recommendations(recommendations):
         return
     print(f"\n{'='*80}")
     print(f"  TRADEFLOW NG — WEEKLY RECOMMENDATIONS")
-    print(f"  Generated: {date.today()}")
+    print(f"  Generated: {_utc_today()}")
     print(f"{'='*80}")
     for _, row in recommendations.sort_values(
         "expected_profit_ngn", ascending=False
     ).iterrows():
         flags = []
         if row.get("is_shock_flagged"):    flags.append("⚠ HIGH-RISK")
-        if row.get("missing_cost_flag"):   flags.append("⚠ NO COST DATA")
+        if row.get("missing_cost_flag"):   flags.append("⚠ EST. TRANSPORT")
         if row.get("is_backhaul"):         flags.append("↩ BACKHAUL")
         flag_str = "  " + " | ".join(flags) if flags else ""
         print(
@@ -519,8 +633,8 @@ def print_recommendations(recommendations):
 
 def run_optimization_pipeline():
     start      = datetime.now()
-    week_start = date.today()
-    week_end   = date.today() + timedelta(days=7)
+    week_start = _utc_today()
+    week_end   = _utc_today() + timedelta(days=7)
 
     print(f"\n{'='*52}")
     print(f"  OPTIMIZATION PIPELINE — {start.strftime('%Y-%m-%d %H:%M')}")
@@ -540,10 +654,25 @@ def run_optimization_pipeline():
             return None
 
         print("\n[2/6] Building profit matrix...")
-        matrix = build_profit_matrix(
-            forecasts, supply_prices, corridors, transport_costs
+        vehicle_types = load_vehicle_types()
+        est_vehicle   = pick_estimate_vehicle(vehicle_types)
+        matrix, stale_suppressed = build_profit_matrix(
+            forecasts, supply_prices, corridors, transport_costs,
+            est_vehicle=est_vehicle,
         )
         if matrix.empty:
+            # An empty matrix after suppression is an EXPECTED state (training
+            # data too old), not a pipeline failure. Record the run honestly
+            # and log "Skipped" so it doesn't page anyone.
+            if stale_suppressed:
+                msg = f"No viable routes (stale: {stale_suppressed} suppressed)"
+                run_id = save_optimization_run(0, msg, week_start, week_end)
+                print(f"  ⓘ {msg}.")
+                print(f"     Forecasts are built on stale training data; "
+                      f"refresh confirmed prices to restore recommendations.")
+                log_run("Skipped", len(forecasts), 0, duration=round(
+                    (datetime.now() - start).total_seconds(), 2))
+                return None
             log_run("Failed", 0, 0, error="Empty profit matrix")
             return None
 

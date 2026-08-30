@@ -6,7 +6,7 @@ All DB access goes through db_adapter (handles SQLite ↔ PostgreSQL).
 
 import pandas as pd
 import numpy as np
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 import warnings
 warnings.filterwarnings("ignore")
 import os
@@ -20,6 +20,26 @@ except ImportError:
 
 # Minimum data points required to train Prophet
 MIN_ROWS = 10
+
+# ── Reliability under stale training data ──────────────────
+# When the newest confirmed training point is older than this many days, the
+# trend can't be trusted: train with flat growth (level + seasonality only)
+# and mark the forecast STALE so the optimizer can suppress recs built on it.
+STALENESS_MAX_DAYS = 30
+# Bound every forecast to a plausible band around observed history:
+# [hist_min·(1-CLAMP_MARGIN), hist_max·(1+CLAMP_MARGIN)]. Replaces the old
+# clip(lower=0) that turned negative runaways into a false 0.0 and left
+# positive runaways unbounded.
+CLAMP_MARGIN = 0.5
+# Marker prefix written into shock_reason for stale forecasts; the optimizer
+# keys off this exact token — keep it in sync with optimization.STALE_MARKER.
+STALE_MARKER = "STALE_TRAINING"
+
+
+def _utc_today():
+    """Canonical pipeline date. UTC so the write side (generated_on) agrees
+    with the optimizer's server-side reads regardless of machine timezone."""
+    return datetime.now(timezone.utc).date()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -57,8 +77,11 @@ def load_training_data(state_id, commodity_id):
 # 2. TRAIN PROPHET
 # ═══════════════════════════════════════════════════════════
 
-def train_prophet(df, commodity_name=""):
+def train_prophet(df, commodity_name="", stale=False):
+    # Stale series: the last training point is months old, so a linear trend
+    # would extrapolate wildly. Flat growth => level + seasonality only.
     model = Prophet(
+        growth="flat" if stale else "linear",
         yearly_seasonality=True,
         weekly_seasonality=True,
         daily_seasonality=False,
@@ -84,7 +107,7 @@ def generate_forecast(model, df_train, periods=7):
     training data point to today + 7 days ahead.
     """
     last_date = pd.Timestamp(df_train["ds"].max())
-    today     = pd.Timestamp(date.today())
+    today     = pd.Timestamp(_utc_today())
     
     # How many days from last training point to today
     days_gap      = max((today - last_date).days, 0)
@@ -97,9 +120,16 @@ def generate_forecast(model, df_train, periods=7):
     # Now filter to only FUTURE dates (after today)
     forecast = forecast[forecast["ds"] > today].head(periods).copy()
     forecast = forecast[["ds", "yhat", "yhat_lower", "yhat_upper"]].copy()
-    forecast["yhat"]       = forecast["yhat"].clip(lower=0)
-    forecast["yhat_lower"] = forecast["yhat_lower"].clip(lower=0)
-    forecast["yhat_upper"] = forecast["yhat_upper"].clip(lower=0)
+
+    # Clamp to a plausible band around observed history. Bounds a runaway
+    # trend instead of masking it with clip(lower=0) (which turned negative
+    # runaways into a false 0.0 and left positive runaways unbounded).
+    hist_min = float(df_train["y"].min())
+    hist_max = float(df_train["y"].max())
+    floor    = max(0.0, hist_min * (1 - CLAMP_MARGIN))
+    ceil     = hist_max * (1 + CLAMP_MARGIN)
+    for col in ("yhat", "yhat_lower", "yhat_upper"):
+        forecast[col] = forecast[col].clip(lower=floor, upper=ceil)
 
     return forecast
 
@@ -141,12 +171,18 @@ def detect_shock(forecast_row, historical_mean, historical_std,
 
 def write_forecasts(forecast_df, state_id, commodity_id,
                     historical_mean, historical_std,
-                    model_version="prophet_v1.0"):
+                    model_version="prophet_v2.0",
+                    data_age_days=0, stale=False):
     """
     Delete-then-insert approach — avoids ON CONFLICT translation issues.
     Deletes existing forecasts for this state-commodity before inserting fresh ones.
+
+    `stale`/`data_age_days` carry the training-data-age signal: for stale
+    series each row is force-flagged and its shock_reason is prefixed with
+    STALE_TRAINING:<n>d so the optimizer can suppress recs built on it.
     """
-    today    = str(date.today())
+    today       = str(_utc_today())
+    row_version = f"{model_version}_flat" if stale else model_version
     inserted = 0
     skipped  = 0
 
@@ -168,6 +204,10 @@ def write_forecasts(forecast_df, state_id, commodity_id,
     # Step 2 — Insert fresh forecasts
     for _, row in forecast_df.iterrows():
         is_shock, shock_reason = detect_shock(row, historical_mean, historical_std)
+        if stale:
+            tag = f"{STALE_MARKER}:{int(data_age_days)}d"
+            shock_reason = f"{tag} | {shock_reason}" if shock_reason else tag
+            is_shock = True
         try:
             db_execute("""
                 INSERT INTO forecasts (
@@ -184,7 +224,7 @@ def write_forecasts(forecast_df, state_id, commodity_id,
                 round(float(row["yhat"]),       2),
                 round(float(row["yhat_lower"]), 2),
                 round(float(row["yhat_upper"]), 2),
-                model_version,
+                row_version,
                 bool(is_shock),
                 shock_reason,
             ))
@@ -218,7 +258,7 @@ def log_run(status, records_in=0, records_out=0, error=None, duration=None):
 # 7. MAIN PIPELINE
 # ═══════════════════════════════════════════════════════════
 
-def run_forecasting_pipeline(periods=7, model_version="prophet_v1.0"):
+def run_forecasting_pipeline(periods=7, model_version="prophet_v2.0"):
     """
     Load all active state+commodity combos → train Prophet →
     generate 7-day forecast → write to forecasts table.
@@ -249,6 +289,7 @@ def run_forecasting_pipeline(periods=7, model_version="prophet_v1.0"):
     total_skipped  = 0
     total_shocks   = 0
     skipped_combos = []
+    errors         = []
 
     print(f"  Found {total_combos} state-commodity combinations to forecast.\n")
 
@@ -270,7 +311,14 @@ def run_forecasting_pipeline(periods=7, model_version="prophet_v1.0"):
             hist_mean = float(df["y"].mean())
             hist_std  = float(df["y"].std())
 
-            model    = train_prophet(df, commodity_name)
+            # Age of the newest confirmed training point (UTC-consistent).
+            last_train_date = pd.Timestamp(df["ds"].max())
+            data_age_days   = max(
+                (pd.Timestamp(_utc_today()) - last_train_date).days, 0
+            )
+            stale = data_age_days > STALENESS_MAX_DAYS
+
+            model    = train_prophet(df, commodity_name, stale=stale)
             forecast = generate_forecast(model, df, periods=periods)
 
             shocks_this = sum(
@@ -280,25 +328,44 @@ def run_forecasting_pipeline(periods=7, model_version="prophet_v1.0"):
 
             inserted, skipped = write_forecasts(
                 forecast, state_id, commodity_id,
-                hist_mean, hist_std, model_version
+                hist_mean, hist_std, model_version,
+                data_age_days=data_age_days, stale=stale,
             )
 
             total_inserted += inserted
             total_skipped  += skipped
             total_shocks   += shocks_this
 
-            shock_tag = f" ⚠ {shocks_this} HIGH-RISK days" if shocks_this else ""
+            if stale:
+                shock_tag = f" ⚠ STALE ({data_age_days}d old) — flat + flagged"
+            elif shocks_this:
+                shock_tag = f" ⚠ {shocks_this} HIGH-RISK days"
+            else:
+                shock_tag = ""
             print(f"    ✓ {inserted} forecast days written.{shock_tag}")
 
         except Exception as e:
             print(f"    ✗ Failed: {e}")
             skipped_combos.append(label)
+            errors.append(f"{label}: {e}")
 
     duration = (datetime.now() - start).total_seconds()
-    log_run("Success", total_combos, total_inserted, duration=round(duration, 2))
+    # Honest status: a run that wrote nothing is a FAILURE, not a success.
+    # (Previously this always logged "Success", which is why 0-output went
+    #  unnoticed for two months and silently starved the optimizer.)
+    if total_inserted > 0:
+        status, err = "Success", None
+    elif errors:
+        status, err = "Failed", f"0 forecasts written; first error: {errors[0]}"
+    elif total_skipped:
+        status, err = "Failed", f"0 forecasts written; {total_skipped} rows rejected on insert"
+    else:
+        status, err = "Failed", f"0 forecasts written; all {total_combos} combos had insufficient data"
+    log_run(status, total_combos, total_inserted, error=err, duration=round(duration, 2))
 
+    icon = "✓" if status == "Success" else "✗"
     print(f"\n{'='*52}")
-    print(f"  ✓ Forecasting complete in {round(duration,1)}s")
+    print(f"  {icon} Forecasting {status} in {round(duration,1)}s")
     print(f"  Combinations:   {total_combos}")
     print(f"  Forecast days:  {total_inserted}")
     print(f"  High-risk days: {total_shocks}")
@@ -322,7 +389,7 @@ def preview_forecasts(commodity_name=None, state_name=None, n=7):
         FROM   forecasts f
         JOIN   states      s ON f.state_id     = s.id
         JOIN   commodities c ON f.commodity_id = c.id
-        WHERE  f.generated_on = CURRENT_DATE
+        WHERE  f.generated_on = (SELECT MAX(generated_on) FROM forecasts)
     """
     params = []
     if commodity_name:
