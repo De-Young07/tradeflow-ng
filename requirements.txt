@@ -8,4 +8,9 @@ python-dotenv>=1.0.0
 openpyxl>=3.1.2
 sqlalchemy>=2.0.0
 pulp>=2.7.0
-prophet
+prophet==1.1.5
+# Pin cmdstanpy < 1.3.0: 1.3.0's stricter set_cmdstan_path rejects Prophet
+# 1.1.5's bundled precompiled cmdstan ("missing makefile"), so forecasting
+# silently writes 0 rows. This transitive bump (not prophet) caused the
+# mid-2026 forecasting outage that starved the optimizer.
+cmdstanpy==1.2.4
