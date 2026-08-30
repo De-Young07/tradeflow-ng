@@ -226,29 +226,40 @@ def write_cleaned_prices(df):
         print("  Nothing to write.")
         return 0
 
-    conn = get_connection()
-    cursor= conn.cursor()
+    # Route through db_adapter.execute so the SQL is translated per-backend:
+    # on PostgreSQL the "?" placeholders become "%s" and it runs as a plain
+    # parameterized INSERT. A raw cursor here previously sent SQLite-only
+    # "INSERT OR IGNORE" straight to Postgres, which failed with
+    # 'syntax error at or near "OR"' and dropped every row (0 inserted).
+    #
+    # "ON CONFLICT DO NOTHING" (no target) is the portable equivalent of
+    # INSERT OR IGNORE — valid on PostgreSQL and SQLite (>= 3.24) — and is left
+    # untouched by _translate. Each row is its own transaction (execute() commits
+    # per call and rolls back on error), so one bad row can't poison the batch.
+    sql = """
+        INSERT INTO cleaned_prices (
+            raw_submission_id,
+            state_id,
+            market_id,
+            commodity_id,
+            price_per_unit,
+            price_per_kg,
+            quantity_available,
+            price_date,
+            is_outlier,
+            outlier_reason,
+            is_confirmed,
+            cleaning_notes
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT DO NOTHING
+    """
+
     inserted = 0
     skipped  = 0
 
     for _, row in df.iterrows():
         try:
-            cursor.execute("""
-                INSERT OR IGNORE INTO cleaned_prices (
-                    raw_submission_id,
-                    state_id,
-                    market_id,
-                    commodity_id,
-                    price_per_unit,
-                    price_per_kg,
-                    quantity_available,
-                    price_date,
-                    is_outlier,
-                    outlier_reason,
-                    is_confirmed,
-                    cleaning_notes
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            """, (
+            execute(sql, (
                 None if row.get("source_channel") == "Dummy" else (int(row["raw_id"]) if pd.notna(row.get("raw_id")) else None),
                 int(row["state_id"]),
                 int(row["market_id"])            if pd.notna(row.get("market_id"))           else None,
@@ -267,9 +278,6 @@ def write_cleaned_prices(df):
             skipped += 1
             print(f"    Skipped row: {e}")
 
-    conn.commit()
-    cursor.close()
-    conn.close()
     print(f"  Written: {inserted} inserted, {skipped} skipped.")
     return inserted
 
