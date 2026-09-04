@@ -24,6 +24,7 @@ import requests
 import pandas as pd
 import configparser
 import os
+import re
 import json
 from datetime import datetime, date
 
@@ -41,9 +42,26 @@ CONFIG_PATH = os.path.join(
 
 def load_config():
     """
-    Load Kobo config. Tries st.secrets first (cloud),
-    then falls back to config.ini (local).
+    Load Kobo config. Order of precedence:
+      1. Environment variables — KOBO_API_TOKEN / KOBO_ASSET_UID / KOBO_BASE_URL.
+         Used by the GitHub Actions cron and Render (12-factor style).
+      2. Streamlit secrets ([kobo]) — Streamlit Cloud.
+      3. config.ini [kobo] — local development.
+
+    The env-var branch is the critical fix: the cron supplies the Kobo
+    credentials as env vars and has no st.secrets/config.ini, so the previous
+    version always raised FileNotFoundError and silently logged "Skipped" —
+    the daily pull never actually ran.
     """
+    env_token = os.environ.get("KOBO_API_TOKEN")
+    env_uid   = os.environ.get("KOBO_ASSET_UID")
+    if env_token and env_uid:
+        return {
+            "api_token": env_token,
+            "asset_uid": env_uid,
+            "base_url":  os.environ.get("KOBO_BASE_URL", "https://kf.kobotoolbox.org"),
+        }
+
     try:
         import streamlit as st
         if hasattr(st, 'secrets') and 'kobo' in st.secrets:
@@ -126,37 +144,39 @@ def get_last_pull_date():
 #    *** UPDATE RIGHT SIDE after finalising your Kobo form ***
 # ═══════════════════════════════════════════════════════════
 
+# Verified against the live form aeDSWts7gAbvvkLpHXBoHJ. The Kobo group hashes
+# (group_yz6tj97 etc.) are part of the actual field paths — do not "clean" them.
 FIELD_MAP = {
     # Identification
-    "agent_id":       "group_identification/agent_id",        # e.g. TFN-KW-001
-    "submission_id":  "_id",
+    "agent_id":       "group_yz6tj97/Agent_ID",        # e.g. "tfn_og__002" -> TFN-OG-002
+    "submission_id":  "_uuid",                         # stable per submission
     "submission_time":"_submission_time",
 
     # Location — BOTH market and state
-    "state":          "group_location/state_name",
-    "market":         "group_location/market_name",
-    "gps":            "group_identification/_geolocation",
+    "state":          "group_yz6tj97/State",
+    "market":         "group_st2fa62/Market_name",
+    "gps":            "_geolocation",
 
-    # Commodity prices (repeat group — handled separately)
-    "commodity":      "group_prices/commodity_name",
-    "price":          "group_prices/price_per_unit",
-    "unit":           "group_prices/unit_of_measure",
-    "quantity":       "group_prices/quantity_available",
-    "quality_grade":  "group_prices/quality_grade",
-    "availability":   "group_prices/availability_level",
+    # Commodity prices (repeat group group_yl2fa13 — handled separately)
+    "commodity":      "group_yl2fa13/Commodity_name",
+    "price":          "group_yl2fa13/Price_per_standard_unit",
+    "unit":           "group_yl2fa13/Standard_unit_used",
+    "quantity":       "group_yl2fa13/Estimated_quantity_a_able_in_market_today",
+    "quality_grade":  "group_yl2fa13/Quality_grade_observed",
 
-    # Transport
-    "road_condition": "group_transport/road_condition",
-    "transport_cost": "group_transport/transport_cost_estimate",
-    "vehicle_type":   "group_transport/vehicle_type",
+    # Transport (route section — optional, may be blank)
+    "road_condition": "group_xv7xj58/Any_road_issues_affecting_move",
+    "transport_cost": "group_xv7xj58/Approximate_transpor_nearest_major_city_",
+    "vehicle_type":   "group_xv7xj58/Dominant_truck_type_on_this_route_today",
 
     # Observations
-    "market_activity":"group_market/market_activity_level",
-    "disruptions":    "group_market/disruptions",
-    "notes":          "group_observations/additional_notes",
-    "photo":          "group_observations/commodity_photo",
-    "confidence":     "group_observations/price_confidence",
+    "market_activity":"group_st2fa62/Estimated_number_of_active_sellers_today",
+    "notes":          "group_st2fa62/Any_market_disruptions_today",
+    "confidence":     "group_yr21e94/Estimated_confidence_in_prices_reported",
 }
+
+# Repeat-group key (one entry per commodity). Was "group_prices" (never existed).
+REPEAT_GROUP_KEY = "group_yl2fa13"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -198,6 +218,25 @@ def _get(submission, logical_key):
     return submission.get(field_name)
 
 
+def normalize_agent_id(raw):
+    """Match the form's agent id to the DB agent_id: 'tfn_og__002' -> 'TFN-OG-002'."""
+    if not raw:
+        return ""
+    s = str(raw).strip().upper().replace("_", "-")
+    return re.sub(r"-+", "-", s)          # collapse repeated dashes
+
+
+def _to_float(v):
+    """Best-effort numeric parse; None on blank/non-numeric (never raises).
+    Kobo free-text / select fields must not crash an entire submission."""
+    if v in (None, ""):
+        return None
+    try:
+        return float(str(v).replace(",", "").strip())
+    except (ValueError, TypeError):
+        return None
+
+
 def parse_submission(submission, lookup_maps):
     """
     Parse a single Kobo submission dict into one or more
@@ -207,7 +246,7 @@ def parse_submission(submission, lookup_maps):
     """
     try:
         # ── Agent lookup by agent_id text ──────────────────
-        agent_id_text = str(_get(submission, "agent_id") or "").strip().upper()
+        agent_id_text = normalize_agent_id(_get(submission, "agent_id"))
         agent_db_id   = lookup_maps["agents"].get(agent_id_text)
 
         if not agent_db_id:
@@ -224,11 +263,19 @@ def parse_submission(submission, lookup_maps):
         # ── Market ─────────────────────────────────────────
         market_name = str(_get(submission, "market") or "").strip().lower()
         market_id   = lookup_maps["markets"].get(market_name)
-        # market_id can be None if market not yet in DB — we still accept
+        if market_id is None and market_name:
+            # form value looks like "ago_iwoye__ogun"; DB name like "Ago-Iwoye Market"
+            guess = market_name.split("__")[0].replace("_", "-")
+            market_id = (lookup_maps["markets"].get(guess)
+                         or lookup_maps["markets"].get(guess + " market"))
+        # market_id can still be None if market not yet in DB — we still accept
 
         # ── Dates ──────────────────────────────────────────
-        submit_time     = _get(submission, "submission_time")
-        submission_date = str(submit_time)[:10] if submit_time else str(date.today())
+        # Prefer the survey date (end/start) so price_date matches the demo
+        # ingester; fall back to server submission time, then today.
+        raw_date        = str(submission.get("end") or submission.get("start")
+                              or _get(submission, "submission_time") or "")[:10]
+        submission_date = raw_date if raw_date else str(date.today())
         kobo_sub_id     = str(_get(submission, "submission_id") or "")
 
         # ── Road condition / transport (form-level fields) ─
@@ -245,8 +292,8 @@ def parse_submission(submission, lookup_maps):
             gps_str = f"{gps[0]},{gps[1]}"
 
         # ── Commodity repeat group ─────────────────────────
-        # Kobo repeat groups use a key like "group_prices" → list of dicts
-        repeat_key = "group_prices"
+        # Kobo repeat groups appear inline as a list of dicts under the group key
+        repeat_key = REPEAT_GROUP_KEY
         commodities_list = submission.get(repeat_key, [])
 
         # If the form uses flat fields (not repeat group) fall back to single
@@ -289,24 +336,20 @@ def parse_submission(submission, lookup_maps):
                 continue
 
             records.append({
-                "kobo_submission_id": kobo_sub_id + f"_{comm_name[:4]}",
+                # Match the demo ingester's id scheme so the two paths are
+                # mutually idempotent (UNIQUE constraint on kobo_submission_id).
+                "kobo_submission_id": f"{kobo_sub_id}_{comm_name[:8]}",
                 "agent_id":           agent_db_id,
                 "state_id":           state_id,
                 "market_id":          market_id,
                 "commodity_id":       commodity_id,
                 "reported_price":     price_val,
                 "reported_unit":      cget("unit"),
-                "quantity_available": (
-                    float(cget("quantity"))
-                    if cget("quantity") else None
-                ),
+                "quantity_available": _to_float(cget("quantity")),
                 "quality_grade":      cget("quality_grade"),
                 "market_activity":    market_activity,
                 "road_condition":     road_condition,
-                "transport_cost_est": (
-                    float(str(transport_cost).replace(",",""))
-                    if transport_cost else None
-                ),
+                "transport_cost_est": _to_float(transport_cost),
                 "price_confidence":   confidence,
                 "submission_date":    submission_date,
                 "gps_coordinates":    gps_str,

@@ -39,6 +39,13 @@ INCOMPATIBLE_PAIRS = {
 SUPPRESS_STALE_RECS = True
 STALE_MARKER        = "STALE_TRAINING"   # keep in sync with forecasting.STALE_MARKER
 FORECAST_FRESH_DAYS = 2                   # warn if the latest forecast batch is older
+# A shock-flagged forecast whose confidence band has collapsed to ~zero width is
+# the fingerprint of clamp-railing: an over-extrapolated trend clipped to the
+# historical band, so predicted == lower == upper at the rail. It carries no real
+# signal, so the optimizer skips it rather than let an artificial extreme headline
+# a recommendation. Forecasting now uses flat growth for far-out targets, so these
+# should be rare — this is defense in depth.
+RAILED_BAND_RATIO   = 0.001
 
 # ── Interim transport-cost estimate ────────────────────────
 # Used ONLY when transport_costs has no valid row for a route. Real cost rows
@@ -204,6 +211,19 @@ def load_vehicle_types():
 # 2. BUILD PROFIT MATRIX
 # ═══════════════════════════════════════════════════════════
 
+def is_railed_artifact(forecast_row):
+    """True when a shock-flagged forecast's confidence band has collapsed to
+    ~zero width — the clamp-rail signature (see RAILED_BAND_RATIO). A legitimate
+    shock keeps a wide band, so it is not caught here."""
+    if not bool(forecast_row["is_shock_flagged"]):
+        return False
+    pred = float(forecast_row["predicted_price"] or 0)
+    if pred <= 0:
+        return False
+    band = float(forecast_row["upper_bound"] or 0) - float(forecast_row["lower_bound"] or 0)
+    return (band / pred) < RAILED_BAND_RATIO
+
+
 def build_profit_matrix(forecasts, supply_prices, corridors, transport_costs,
                         est_vehicle=None):
     if est_vehicle is None:
@@ -215,7 +235,8 @@ def build_profit_matrix(forecasts, supply_prices, corridors, transport_costs,
         }
     rows = []
     missing_cost_warnings = []
-    stale_suppressed = 0
+    stale_suppressed  = 0
+    railed_suppressed = 0
 
     for _, corridor in corridors.iterrows():
         origin_id   = corridor["origin_state_id"]
@@ -250,6 +271,12 @@ def build_profit_matrix(forecasts, supply_prices, corridors, transport_costs,
             is_stale = bool(shock_reason) and str(shock_reason).startswith(STALE_MARKER)
             if SUPPRESS_STALE_RECS and is_stale:
                 stale_suppressed += 1
+                continue
+
+            # Skip clamp-railed artifacts (collapsed-band shock forecasts) so an
+            # over-extrapolated extreme can't headline a recommendation.
+            if is_railed_artifact(forecast_row):
+                railed_suppressed += 1
                 continue
 
             cost_row = transport_costs[
@@ -315,6 +342,10 @@ def build_profit_matrix(forecasts, supply_prices, corridors, transport_costs,
     if stale_suppressed:
         print(f"  ⓘ Suppressed {stale_suppressed} route(s) built on stale "
               f"forecasts (SUPPRESS_STALE_RECS=on).")
+
+    if railed_suppressed:
+        print(f"  ⓘ Skipped {railed_suppressed} route(s) built on clamp-railed "
+              f"forecast artifacts (collapsed-band shocks).")
 
     if missing_cost_warnings:
         print(f"\n  ⚠ Estimated transport for {len(missing_cost_warnings)} route(s) "
