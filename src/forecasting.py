@@ -26,6 +26,27 @@ MIN_ROWS = 10
 # trend can't be trusted: train with flat growth (level + seasonality only)
 # and mark the forecast STALE so the optimizer can suppress recs built on it.
 STALENESS_MAX_DAYS = 30
+# Even when data is not "stale" (> STALENESS_MAX_DAYS), a linear trend must not
+# be extrapolated far beyond the last confirmed point, or it runs away and rails
+# to the clamp band below — yielding a flat, zero-width, artificially-extreme
+# forecast. When the first forecast day is more than this many days past the last
+# confirmed point, train with flat growth (level + seasonality) instead: a
+# conservative in-band forecast that is still trusted (NOT marked stale), just no
+# longer trend-extrapolated.
+MAX_TREND_EXTRAP_DAYS = 14
+# Yearly seasonality needs a multi-year window to be identifiable. On a short
+# training span Prophet's yearly Fourier basis is unconstrained and extrapolates
+# explosively just past the data (₦600k+ swings that the clamp then masks as a
+# railed ceiling — the real cause of the flat, zero-width artifact). Enable yearly
+# only once the span reaches this many days; it auto-turns-on as history
+# accumulates. Weekly seasonality (needs only weeks) and the trend still model the
+# real signal meanwhile.
+YEARLY_MIN_SPAN_DAYS = 730
+# Weekly seasonality likewise needs enough observations to identify a 7-day
+# cycle. On a handful of sparse points it overfits and swings hard enough to rail
+# against the clamp floor/ceiling. Require at least this many training rows before
+# fitting weekly; below it, fall back to level + trend only.
+WEEKLY_MIN_ROWS = 20
 # Bound every forecast to a plausible band around observed history:
 # [hist_min·(1-CLAMP_MARGIN), hist_max·(1+CLAMP_MARGIN)]. Replaces the old
 # clip(lower=0) that turned negative runaways into a false 0.0 and left
@@ -77,13 +98,23 @@ def load_training_data(state_id, commodity_id):
 # 2. TRAIN PROPHET
 # ═══════════════════════════════════════════════════════════
 
-def train_prophet(df, commodity_name="", stale=False):
-    # Stale series: the last training point is months old, so a linear trend
-    # would extrapolate wildly. Flat growth => level + seasonality only.
+def train_prophet(df, commodity_name="", flat_growth=False):
+    # flat_growth: the last confirmed point sits far enough behind the forecast
+    # window that a linear trend can't be trusted (stale data, or simply a long
+    # gap to the target). Flat growth => level + seasonality only, so the forecast
+    # can't run away and rail to the clamp band.
+    # Seasonalities are gated on data sufficiency — each explodes out-of-sample
+    # when under-identified: yearly on <2yr span (see YEARLY_MIN_SPAN_DAYS),
+    # weekly on too few rows (see WEEKLY_MIN_ROWS). Below threshold we fall back
+    # to level + trend, which the clamp then keeps in-band.
+    n_rows     = len(df)
+    span_days  = int((df["ds"].max() - df["ds"].min()).days) if n_rows else 0
+    use_yearly = span_days >= YEARLY_MIN_SPAN_DAYS
+    use_weekly = n_rows >= WEEKLY_MIN_ROWS and span_days >= 14
     model = Prophet(
-        growth="flat" if stale else "linear",
-        yearly_seasonality=True,
-        weekly_seasonality=True,
+        growth="flat" if flat_growth else "linear",
+        yearly_seasonality=use_yearly,
+        weekly_seasonality=use_weekly,
         daily_seasonality=False,
         changepoint_prior_scale=0.3,
         seasonality_prior_scale=10.0,
@@ -316,9 +347,17 @@ def run_forecasting_pipeline(periods=7, model_version="prophet_v2.0"):
             data_age_days   = max(
                 (pd.Timestamp(_utc_today()) - last_train_date).days, 0
             )
-            stale = data_age_days > STALENESS_MAX_DAYS
+            # Two escalating thresholds off the same data-age signal:
+            #  • far_from_data → flat growth (trend can't span the gap) but the
+            #    forecast is still trusted/usable by the optimizer.
+            #  • stale → additionally flag STALE_TRAINING so the optimizer
+            #    suppresses recs built on it (data simply too old to trust).
+            # The first forecast day is (data_age_days + 1) past the last point.
+            far_from_data = (data_age_days + 1) > MAX_TREND_EXTRAP_DAYS
+            stale         = data_age_days > STALENESS_MAX_DAYS
+            use_flat      = stale or far_from_data
 
-            model    = train_prophet(df, commodity_name, stale=stale)
+            model    = train_prophet(df, commodity_name, flat_growth=use_flat)
             forecast = generate_forecast(model, df, periods=periods)
 
             shocks_this = sum(
@@ -338,6 +377,10 @@ def run_forecasting_pipeline(periods=7, model_version="prophet_v2.0"):
 
             if stale:
                 shock_tag = f" ⚠ STALE ({data_age_days}d old) — flat + flagged"
+            elif far_from_data:
+                extra     = f" — {shocks_this} HIGH-RISK days" if shocks_this else ""
+                shock_tag = (f" ⓘ flat growth ({data_age_days}d gap; trend not "
+                             f"extrapolated){extra}")
             elif shocks_this:
                 shock_tag = f" ⚠ {shocks_this} HIGH-RISK days"
             else:
